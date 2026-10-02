@@ -47,6 +47,88 @@
   {% elif refresh_result == 'stale' %}<p class="status-message status-message-warning" role="status">Yahoo chưa phản hồi; đang dùng snapshot cache cũ.</p>
   {% elif refresh_result == 'unavailable' %}<p class="status-message status-message-error" role="alert">Không tải được giá mới và không có cache để dùng.</p>{% endif %}
 
+  <section style="margin-top: 1.75rem;">
+    <div class="section-heading">
+      <div>
+        <h2>Tổng quan thị trường</h2>
+        <small class="muted">VN-Index và VN30 · OHLCV ngày từ Vietcap</small>
+      </div>
+      <small class="muted">{% if overview.index_data_updated_at %}{{ overview.index_data_updated_at }} UTC · {% endif %}{{ overview.index_cache_status }}</small>
+    </div>
+    {% if overview.index_data_status %}<p class="data-status" role="status">{{ overview.index_data_status }}</p>{% endif %}
+    <div class="index-grid">
+      {% for index in overview.market_indices %}
+        <article class="index-card">
+          <div class="index-card-header">
+            <div>
+              <small class="muted">{{ index.symbol }}</small>
+              <h3>{{ index.name }}</h3>
+            </div>
+            {% if overview.index_cache_status == 'stale' %}
+              <span class="data-source data-source-unavailable">VIETCAP · STALE</span>
+            {% elif overview.index_cache_status == 'disk' %}
+              <span class="data-source data-source-cache">VIETCAP · CACHE</span>
+            {% else %}
+              <span class="data-source data-source-live">VIETCAP · LIVE</span>
+            {% endif %}
+          </div>
+          <div class="index-price">{{ '%.2f'|format(index.last_price) }}</div>
+          <div class="index-metrics">
+            <span class="index-metric">Trend {{ index.trend_signal }} · {{ index.trend_momentum }}%</span>
+            <span class="index-metric">Mean Reversion {{ index.mean_reversion_signal }} · {{ index.mean_reversion_momentum }}%</span>
+            {% if index.volume is not none %}<span class="index-metric">Volume {{ '{:,.0f}'.format(index.volume) }}</span>{% endif %}
+          </div>
+          <strong class="{% if index.recommendation == 'Buy' %}pattern-buy{% elif index.recommendation == 'Sell' %}pattern-sell{% else %}pattern-watch{% endif %}">
+            Tín hiệu tổng hợp: {% if index.recommendation == 'Buy' %}Mua{% elif index.recommendation == 'Sell' %}Bán{% else %}Theo dõi{% endif %}
+          </strong>
+          <div class="pattern-list">
+            {% for pattern in index.chart_patterns %}
+              <div class="pattern-item {% if pattern.signal == 'Mua' %}pattern-buy{% elif pattern.signal == 'Bán' %}pattern-sell{% elif pattern.signal == 'Theo dõi' %}pattern-watch{% else %}pattern-none{% endif %}">
+                <span class="pattern-label">{{ pattern.name }} · {{ pattern.signal }}</span>
+                <small class="pattern-detail">{{ pattern.message }}{% if pattern.neckline is not none %} Neckline {{ '%.2f'|format(pattern.neckline) }}.{% endif %}{% if pattern.volume_ratio is not none %} Volume {{ pattern.volume_ratio }}× {{ pattern.volume_basis }}.{% endif %}</small>
+              </div>
+            {% endfor %}
+          </div>
+        </article>
+      {% else %}
+        <p class="status-message status-message-warning">Chưa tải được dữ liệu VN-Index/VN30 từ Vietcap.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section style="margin-top: 1.75rem;">
+    <div class="section-heading">
+      <div>
+        <h2>Danh sách cổ phiếu</h2>
+        <small class="muted">Danh sách Vietcap; chọn mã để chạy phân tích Yahoo</small>
+      </div>
+      <small class="muted">{{ overview.universe_cache_status|upper }}{% if overview.universe_data_status %} · {{ overview.universe_data_status }}{% endif %}</small>
+    </div>
+    {% for universe_name in ['HOSE', 'HNX', 'VN30'] %}
+      {% set members = overview.stock_universes[universe_name] %}
+      <details class="universe-list" {% if universe_name == 'VN30' %}open{% endif %}>
+        <summary>{{ universe_name }} · {{ members|length }} mã</summary>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Mã</th><th>Tên doanh nghiệp</th><th>Sàn</th><th>Phân tích</th></tr></thead>
+            <tbody>
+              {% for member in members %}
+                <tr>
+                  <td><strong>{{ member.symbol }}</strong></td>
+                  <td>{{ member.name }}</td>
+                  <td>{{ member.exchange }}</td>
+                  <td><a href="{{ url_for('recommendations_page', symbol=member.symbol) }}">Xem phân tích</a></td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4" class="muted">Chưa tải được danh sách {{ universe_name }}.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endfor %}
+  </section>
+
   <section class="grid" style="margin-top: 1.25rem;">
     <a class="card summary-link" href="#trend-following" aria-label="Xem danh sách cổ phiếu có tín hiệu Trend Following Bullish">
       <p class="muted">Trend Following</p>

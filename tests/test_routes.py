@@ -10,6 +10,42 @@ def _stub_market_data(monkeypatch):
     monkeypatch.setattr(screening_service, "_market_data_source", "unavailable")
     monkeypatch.setattr(screening_service, "load_market_cache", lambda cache_key: None)
     monkeypatch.setattr(screening_service, "save_market_cache", lambda *args: None)
+    monkeypatch.setattr(
+        screening_service,
+        "get_stock_universes",
+        lambda force_refresh=False: {
+            "universes": {
+                "HOSE": [{"symbol": "AAA", "name": "Company A", "exchange": "HOSE"}],
+                "HNX": [{"symbol": "BBB", "name": "Company B", "exchange": "HNX"}],
+                "VN30": [{"symbol": "AAA", "name": "Company A", "exchange": "HOSE"}],
+            },
+            "source": "vietcap",
+            "cache_status": "disk",
+            "data_updated_at": 1,
+            "data_status": None,
+        },
+    )
+    monkeypatch.setattr(
+        screening_service,
+        "get_market_indices",
+        lambda force_refresh=False: {
+            "indices": [{
+                "symbol": "VNINDEX",
+                "name": "VN-Index",
+                "last_price": 1200,
+                "volume": 100000,
+                "trend_signal": "Bullish",
+                "trend_momentum": 5,
+                "mean_reversion_signal": "Neutral",
+                "mean_reversion_momentum": 1,
+                "chart_patterns": [],
+            }],
+            "source": "vietcap",
+            "cache_status": "disk",
+            "data_updated_at": 1,
+            "data_status": None,
+        },
+    )
 
 
 def test_health_endpoint():
@@ -49,6 +85,7 @@ def test_dashboard_includes_seo_metadata_and_noindexes_codespaces_preview(monkey
 
 
 def test_dashboard_labels_yahoo_live_data(monkeypatch):
+    _stub_market_data(monkeypatch)
     market_data = build_mock_market_data()
     for row in market_data:
         row["source"] = "yahoo"
@@ -69,7 +106,19 @@ def test_dashboard_labels_yahoo_live_data(monkeypatch):
     assert "Cốc tay cầm".encode() in response.data
     assert "Sao Mai".encode() in response.data
     assert "Vai đầu vai ngược".encode() in response.data
+    assert "Tổng quan thị trường".encode() in response.data
+    assert b"VN-Index" in response.data
+    assert "HOSE · 1 mã".encode() in response.data
+    assert "HNX · 1 mã".encode() in response.data
+    assert "VN30 · 1 mã".encode() in response.data
     assert "Chốt lời".encode() in response.data
+
+
+def test_dashboard_alias_redirects_to_root():
+    response = create_app().test_client().get("/dashboard")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/"
 
 
 def test_dashboard_identifies_demo_fallback(monkeypatch):
@@ -81,6 +130,7 @@ def test_dashboard_identifies_demo_fallback(monkeypatch):
 
 
 def test_dashboard_reports_live_data_unavailable_without_demo(monkeypatch):
+    _stub_market_data(monkeypatch)
     monkeypatch.setenv("MARKET_DATA_PROVIDER", "yahoo")
     monkeypatch.setattr(screening_service, "_fetch_yahoo_market_data", lambda: ([], 3))
     monkeypatch.setattr(screening_service, "_market_data_cache", None)
@@ -110,6 +160,7 @@ def test_recommendations_page_shows_source_and_risk_levels(monkeypatch):
 
 
 def test_stock_symbol_search_uses_existing_analysis(monkeypatch):
+    _stub_market_data(monkeypatch)
     market_data = [
         {
             **next(row for row in build_mock_market_data() if row["symbol"] == "FPT"),
@@ -145,6 +196,7 @@ def test_stock_symbol_search_rejects_invalid_ticker():
 
 
 def test_refresh_route_fetches_and_redirects_to_requested_page(monkeypatch, tmp_path):
+    _stub_market_data(monkeypatch)
     market_data = [{"symbol": "FPT", "name": "FPT", "close_prices": [10.0, 11.0], "source": "yahoo"}]
     monkeypatch.setenv("MARKET_DATA_PROVIDER", "yahoo")
     monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "refresh.sqlite3"))

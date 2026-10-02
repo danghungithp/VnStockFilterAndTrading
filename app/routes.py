@@ -47,6 +47,10 @@ def register_routes(app):
             refresh_result=request.args.get("refresh_result"),
         )
 
+    @app.route("/dashboard")
+    def dashboard_alias():
+        return redirect(url_for("dashboard"))
+
     @app.route("/recommendations")
     def recommendations_page():
         requested_symbol = request.args.get("symbol", "").strip().upper()

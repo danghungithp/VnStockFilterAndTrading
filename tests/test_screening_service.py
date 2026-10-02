@@ -21,10 +21,54 @@ def _known_return_series():
     return prices
 
 
+def _stub_reference_data(monkeypatch):
+    universes = {
+        "HOSE": [{"symbol": "AAA", "name": "Company A", "exchange": "HOSE"}],
+        "HNX": [{"symbol": "BBB", "name": "Company B", "exchange": "HNX"}],
+        "VN30": [{"symbol": "AAA", "name": "Company A", "exchange": "HOSE"}],
+    }
+    monkeypatch.setattr(
+        screening_service,
+        "get_stock_universes",
+        lambda force_refresh=False: {
+            "universes": universes,
+            "source": "vietcap",
+            "cache_status": "disk",
+            "data_updated_at": 1,
+            "data_status": None,
+        },
+    )
+    monkeypatch.setattr(
+        screening_service,
+        "get_market_indices",
+        lambda force_refresh=False: {
+            "indices": [
+                {
+                    "symbol": "VNINDEX",
+                    "name": "VN-Index",
+                    "last_price": 1200,
+                    "volume": 100000,
+                    "trend_signal": "Bullish",
+                    "trend_momentum": 5,
+                    "mean_reversion_signal": "Neutral",
+                    "mean_reversion_momentum": 1,
+                    "chart_patterns": [],
+                }
+            ],
+            "source": "vietcap",
+            "cache_status": "disk",
+            "data_updated_at": 1,
+            "data_status": None,
+        },
+    )
+
+
 def _stub_market_data_providers(monkeypatch):
     monkeypatch.setenv("MARKET_DATA_PROVIDER", "mock")
     monkeypatch.setattr(screening_service, "_fetch_yahoo_market_data", lambda: ([], 0))
     monkeypatch.setattr(screening_service, "_market_data_cache", None)
+    _stub_reference_data(monkeypatch)
+    _stub_reference_data(monkeypatch)
 
 
 def test_market_data_provider_returns_rows(monkeypatch):
@@ -43,6 +87,51 @@ def test_screening_summary_has_expected_shape(monkeypatch):
     assert len(summary["symbols"]) >= 10
     assert len(summary["strategy_summary"]) == 2
     assert summary["total_positions"] >= 5
+    assert set(summary["stock_universes"]) == {"HOSE", "HNX", "VN30"}
+    assert summary["stock_universes"]["VN30"][0]["symbol"] == "AAA"
+
+
+def test_market_indices_use_existing_trend_and_pattern_models(monkeypatch, tmp_path):
+    history = {
+        "close_prices": _known_return_series(),
+        "volumes": [100.0] * 101,
+        "candles": [],
+    }
+    monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "indices.sqlite3"))
+    monkeypatch.setattr(
+        screening_service,
+        "fetch_vietcap_index_history",
+        lambda symbol, **kwargs: history,
+    )
+
+    result = screening_service.get_market_indices(force_refresh=True)
+
+    assert result["source"] == "vietcap"
+    assert result["cache_status"] == "live"
+    assert [item["symbol"] for item in result["indices"]] == ["VNINDEX", "VN30"]
+    assert all(item["trend_signal"] == "Bullish" for item in result["indices"])
+    assert all(len(item["chart_patterns"]) == 6 for item in result["indices"])
+
+
+def test_stock_universes_include_hose_hnx_and_vn30(monkeypatch, tmp_path):
+    listing = [
+        {"symbol": "AAA", "exchange": "HSX", "type": "STOCK", "organ_name": "A"},
+        {"symbol": "BBB", "exchange": "HNX", "type": "STOCK", "organ_name": "B"},
+        {"symbol": "CCC", "exchange": "UPCOM", "type": "STOCK", "organ_name": "C"},
+    ]
+    monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "universes.sqlite3"))
+    monkeypatch.setattr(screening_service, "_fetch_vietcap_listing", lambda force_refresh=False: listing)
+    monkeypatch.setattr(
+        screening_service,
+        "fetch_vietcap_group",
+        lambda group, timeout=10: [{"symbol": "AAA"}],
+    )
+
+    result = screening_service.get_stock_universes(force_refresh=True)
+
+    assert [row["symbol"] for row in result["universes"]["HOSE"]] == ["AAA"]
+    assert [row["symbol"] for row in result["universes"]["HNX"]] == ["BBB"]
+    assert [row["symbol"] for row in result["universes"]["VN30"]] == ["AAA"]
 
 
 def test_yahoo_daily_history_is_read_from_adjusted_close(monkeypatch):
@@ -99,6 +188,7 @@ def test_legacy_alpha_vantage_setting_uses_yahoo_provider(monkeypatch):
 
 
 def test_yahoo_failure_does_not_fall_back_to_mock(monkeypatch, tmp_path):
+    _stub_reference_data(monkeypatch)
     monkeypatch.setenv("MARKET_DATA_PROVIDER", "yahoo")
     monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "empty.sqlite3"))
     monkeypatch.setattr(screening_service, "_fetch_yahoo_market_data", lambda: ([], 4))
@@ -138,6 +228,28 @@ def test_vietcap_listing_is_filtered_before_yahoo_history(monkeypatch):
     assert {row["source"] for row in market_data} == {"yahoo"}
 
 
+def test_stock_universes_cache_hose_hnx_and_vn30(monkeypatch, tmp_path):
+    listing = [
+        {"symbol": "AAA", "exchange": "HSX", "type": "STOCK", "organ_name": "Company A"},
+        {"symbol": "BBB", "exchange": "HNX", "type": "STOCK", "organ_name": "Company B"},
+        {"symbol": "CCC", "exchange": "UPCOM", "type": "STOCK"},
+    ]
+    monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "universes.sqlite3"))
+    monkeypatch.setattr(screening_service, "_fetch_vietcap_listing", lambda force_refresh=False: listing)
+    monkeypatch.setattr(
+        screening_service,
+        "fetch_vietcap_group",
+        lambda group, timeout=10: [{"symbol": "AAA"}],
+    )
+
+    result = screening_service.get_stock_universes(force_refresh=True)
+
+    assert [row["symbol"] for row in result["universes"]["HOSE"]] == ["AAA"]
+    assert [row["symbol"] for row in result["universes"]["HNX"]] == ["BBB"]
+    assert [row["symbol"] for row in result["universes"]["VN30"]] == ["AAA"]
+    assert result["cache_status"] == "live"
+
+
 def test_vietcap_http_listing_maps_exchange_and_company_names(monkeypatch):
     payload = [
         {
@@ -166,6 +278,67 @@ def test_vietcap_http_listing_maps_exchange_and_company_names(monkeypatch):
             "organ_short_name": "FPT",
         }
     ]
+
+
+def test_vietcap_group_fetches_vn30_constituents(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/getByGroup?group=VN30")
+        return BytesIO(json.dumps([{"symbol": "fpt"}, {"symbol": "ACB"}]).encode())
+
+    monkeypatch.setattr(vietcap_listing, "urlopen", fake_urlopen)
+
+    assert vietcap_listing.fetch_vietcap_group("VN30") == [
+        {"symbol": "FPT"},
+        {"symbol": "ACB"},
+    ]
+
+
+def test_vietcap_index_history_maps_vector_ohlcv(monkeypatch):
+    payload = [{
+        "symbol": "VNINDEX",
+        "t": [1, 2],
+        "o": [100, 101],
+        "h": [103, 104],
+        "l": [99, 100],
+        "c": [102, 103],
+        "v": [1000, 1500],
+    }]
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data)
+        assert request.get_method() == "POST"
+        assert body["symbols"] == ["VNINDEX"]
+        return BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(vietcap_listing, "urlopen", fake_urlopen)
+
+    history = vietcap_listing.fetch_vietcap_index_history("VNINDEX")
+
+    assert history["close_prices"] == [102.0, 103.0]
+    assert history["volumes"] == [1000.0, 1500.0]
+    assert history["candles"][1]["open"] == 101.0
+
+
+def test_market_indices_run_through_existing_analysis(monkeypatch, tmp_path):
+    history = {
+        "close_prices": _known_return_series(),
+        "volumes": [100.0] * 101,
+        "candles": [],
+    }
+    monkeypatch.setenv("MARKET_DATA_CACHE_PATH", str(tmp_path / "indices.sqlite3"))
+    monkeypatch.setattr(
+        screening_service,
+        "fetch_vietcap_index_history",
+        lambda symbol, **kwargs: history,
+    )
+
+    result = screening_service.get_market_indices(force_refresh=True)
+
+    assert result["source"] == "vietcap"
+    assert result["cache_status"] == "live"
+    assert [row["symbol"] for row in result["indices"]] == ["VNINDEX", "VN30"]
+    assert all(row["trend_signal"] == "Bullish" for row in result["indices"])
+    assert all(len(row["chart_patterns"]) == 6 for row in result["indices"])
 
 
 def test_requested_symbol_fetches_only_that_listing_entry(monkeypatch):

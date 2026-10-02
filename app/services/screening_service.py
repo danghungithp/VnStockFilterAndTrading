@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 
 from app.data.market_cache import load_market_cache, save_market_cache
 import app.data.mock_market_data as mock_market_data
-from app.data.vietcap_listing import fetch_vietnam_listings
+from app.data.vietcap_listing import (
+    fetch_vietnam_listings,
+    fetch_vietcap_group,
+    fetch_vietcap_index_history,
+)
 from app.data.yahoo_finance import fetch_daily_history, yahoo_ticker
 from app.strategies.chart_patterns import analyze_chart_patterns
 from app.strategies.mean_reversion import evaluate_mean_reversion_signal
@@ -26,7 +30,9 @@ SCORES = {
 
 _CACHE_TTL_SECONDS = 900
 _YAHOO_CACHE_TTL_SECONDS = 21600
-_MARKET_CACHE_VERSION = 3
+_UNIVERSE_CACHE_TTL_SECONDS = 86400
+_INDEX_CACHE_TTL_SECONDS = 21600
+_MARKET_CACHE_VERSION = 4
 _MIN_KELLY_RETURNS = 20
 _MIN_KELLY_OUTCOMES = 5
 _MAX_POSITION_ALLOCATION_PERCENT = 20
@@ -39,12 +45,33 @@ _market_data_cache_key = None
 _market_data_cache_status = "unavailable"
 _market_data_updated_at = None
 _market_data_cache_lock = threading.Lock()
+_vietcap_listing_cache = None
+_vietcap_listing_cache_at = 0.0
+_vietcap_listing_cache_lock = threading.Lock()
 
 
-def _fetch_vietcap_listing():
-    return fetch_vietnam_listings(
-        timeout=float(os.getenv("LISTING_TIMEOUT", "10"))
-    )
+def _fetch_vietcap_listing(force_refresh=False):
+    global _vietcap_listing_cache, _vietcap_listing_cache_at
+    ttl_seconds = int(os.getenv("MARKET_UNIVERSE_CACHE_TTL", _UNIVERSE_CACHE_TTL_SECONDS))
+    if (
+        not force_refresh
+        and _vietcap_listing_cache is not None
+        and time.monotonic() - _vietcap_listing_cache_at < ttl_seconds
+    ):
+        return _vietcap_listing_cache
+
+    with _vietcap_listing_cache_lock:
+        if (
+            not force_refresh
+            and _vietcap_listing_cache is not None
+            and time.monotonic() - _vietcap_listing_cache_at < ttl_seconds
+        ):
+            return _vietcap_listing_cache
+        _vietcap_listing_cache = fetch_vietnam_listings(
+            timeout=float(os.getenv("LISTING_TIMEOUT", "10"))
+        )
+        _vietcap_listing_cache_at = time.monotonic()
+        return _vietcap_listing_cache
 
 
 def _normalize_market_symbols(listing):
@@ -81,6 +108,88 @@ def _normalize_market_symbols(listing):
             }
         )
     return normalized
+
+
+def _universes_from_cache_rows(rows):
+    universes = {"HOSE": [], "HNX": [], "VN30": []}
+    for row in rows:
+        name = row.get("universe")
+        if name in universes:
+            universes[name].append(
+                {key: value for key, value in row.items() if key != "universe"}
+            )
+    return universes
+
+
+def get_stock_universes(force_refresh=False):
+    cache_key = f"v{_MARKET_CACHE_VERSION}:vietcap-stock-universes"
+    ttl_seconds = int(os.getenv("MARKET_UNIVERSE_CACHE_TTL", _UNIVERSE_CACHE_TTL_SECONDS))
+    disk_cache = load_market_cache(cache_key)
+    if not force_refresh and disk_cache:
+        age = max(0, time.time() - disk_cache["fetched_at"])
+        if age < ttl_seconds:
+            return {
+                "universes": _universes_from_cache_rows(disk_cache["rows"]),
+                "source": "vietcap",
+                "cache_status": "disk",
+                "data_updated_at": disk_cache["fetched_at"],
+                "data_status": None,
+            }
+
+    listing_error = None
+    try:
+        stocks = _normalize_market_symbols(_fetch_vietcap_listing(force_refresh=force_refresh))
+        stocks_by_symbol = {stock["symbol"]: stock for stock in stocks}
+        try:
+            vn30_symbols = fetch_vietcap_group(
+                "VN30", timeout=float(os.getenv("LISTING_TIMEOUT", "10"))
+            )
+            vn30 = [
+                stocks_by_symbol.get(
+                    item["symbol"],
+                    {"symbol": item["symbol"], "name": item["symbol"], "exchange": "HOSE"},
+                )
+                for item in vn30_symbols
+            ]
+        except Exception:
+            vn30 = []
+            listing_error = "Không tải được thành phần VN30 từ Vietcap."
+
+        universes = {
+            "HOSE": [stock for stock in stocks if stock["exchange"] == "HOSE"],
+            "HNX": [stock for stock in stocks if stock["exchange"] == "HNX"],
+            "VN30": vn30,
+        }
+        cache_rows = [
+            {**stock, "universe": name}
+            for name, members in universes.items()
+            for stock in members
+        ]
+        fetched_at = time.time()
+        save_market_cache(cache_key, cache_rows, "vietcap", len(stocks), fetched_at)
+        return {
+            "universes": universes,
+            "source": "vietcap",
+            "cache_status": "live",
+            "data_updated_at": fetched_at,
+            "data_status": listing_error,
+        }
+    except Exception as exc:
+        if disk_cache:
+            return {
+                "universes": _universes_from_cache_rows(disk_cache["rows"]),
+                "source": "vietcap",
+                "cache_status": "stale",
+                "data_updated_at": disk_cache["fetched_at"],
+                "data_status": f"Không làm mới được danh sách Vietcap: {exc}",
+            }
+        return {
+            "universes": {"HOSE": [], "HNX": [], "VN30": []},
+            "source": "unavailable",
+            "cache_status": "unavailable",
+            "data_updated_at": None,
+            "data_status": f"Không tải được danh sách cổ phiếu Vietcap: {exc}",
+        }
 
 
 def _fetch_yahoo_history(stock):
@@ -377,6 +486,98 @@ def _evaluate_stock(item):
     }
 
 
+def get_market_indices(force_refresh=False):
+    cache_key = f"v{_MARKET_CACHE_VERSION}:vietcap-market-indices"
+    ttl_seconds = int(os.getenv("MARKET_INDEX_CACHE_TTL", _INDEX_CACHE_TTL_SECONDS))
+    disk_cache = load_market_cache(cache_key)
+    cache_status = "live"
+    data_status = None
+    updated_at = None
+
+    if not force_refresh and disk_cache:
+        age = max(0, time.time() - disk_cache["fetched_at"])
+        if age < ttl_seconds:
+            raw_indices = disk_cache["rows"]
+            cache_status = "disk"
+            updated_at = disk_cache["fetched_at"]
+        else:
+            raw_indices = None
+    else:
+        raw_indices = None
+
+    if raw_indices is None:
+        def fetch_index(symbol):
+            try:
+                history = fetch_vietcap_index_history(
+                    symbol,
+                    count=100,
+                    timeout=float(os.getenv("MARKET_INDEX_TIMEOUT", "15")),
+                )
+            except Exception:
+                return None
+            if not history["close_prices"]:
+                return None
+            return {
+                "symbol": symbol,
+                "name": "VN-Index" if symbol == "VNINDEX" else "VN30 Index",
+                "exchange": "INDEX",
+                **history,
+                "source": "vietcap",
+            }
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                fetched = list(executor.map(fetch_index, ("VNINDEX", "VN30")))
+            raw_indices = [item for item in fetched if item]
+            if len(raw_indices) != 2:
+                data_status = "Một hoặc nhiều chỉ số chưa có dữ liệu OHLCV từ Vietcap."
+        except Exception as exc:
+            raw_indices = []
+            data_status = f"Không tải được dữ liệu chỉ số từ Vietcap: {exc}"
+
+        updated_at = time.time() if raw_indices else None
+        if raw_indices:
+            try:
+                save_market_cache(cache_key, raw_indices, "vietcap", len(raw_indices), updated_at)
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+        elif disk_cache:
+            raw_indices = disk_cache["rows"]
+            updated_at = disk_cache["fetched_at"]
+            cache_status = "stale"
+            data_status = data_status or "Vietcap chưa phản hồi; đang dùng cache chỉ số cũ."
+        else:
+            cache_status = "unavailable"
+            data_status = data_status or "Chưa có dữ liệu chỉ số từ Vietcap."
+
+    indices = []
+    for item in raw_indices or []:
+        analysis = _evaluate_stock(item)
+        indices.append(
+            {
+                "symbol": item["symbol"],
+                "name": item["name"],
+                "last_price": analysis["last_price"],
+                "volume": item.get("volumes", [None])[-1] if item.get("volumes") else None,
+                "trend_signal": analysis["trend_signal"],
+                "trend_momentum": analysis["trend_momentum"],
+                "mean_reversion_signal": analysis["mean_reversion_signal"],
+                "mean_reversion_momentum": analysis["mean_reversion_momentum"],
+                "recommendation": analysis["recommendation"],
+                "chart_patterns": analysis["chart_patterns"],
+                "source": "vietcap",
+            }
+        )
+
+    return {
+        "indices": indices,
+        "source": "vietcap" if indices else "unavailable",
+        "cache_status": cache_status,
+        "data_updated_at": updated_at,
+        "data_status": data_status,
+    }
+
+
 def _evaluate_market(market_data):
     rows = [_evaluate_stock(item) for item in market_data]
     buy_candidates = sorted(
@@ -406,6 +607,8 @@ def _evaluate_market(market_data):
 
 def get_screening_summary(symbols=None):
     market_data = get_market_data(symbols=symbols)
+    stock_universes = get_stock_universes()
+    market_indices = get_market_indices()
     rows = []
     strategy_summary = {
         "trend_following": {"bullish": 0, "neutral": 0, "bearish": 0},
@@ -446,6 +649,15 @@ def get_screening_summary(symbols=None):
         "strategy_summary": strategy_summary,
         "total_positions": len(rows),
         "stocks": rows,
+        "stock_universes": stock_universes["universes"],
+        "universe_source": stock_universes["source"],
+        "universe_cache_status": stock_universes["cache_status"],
+        "universe_data_status": stock_universes["data_status"],
+        "market_indices": market_indices["indices"],
+        "index_source": market_indices["source"],
+        "index_cache_status": market_indices["cache_status"],
+        "index_data_updated_at": market_indices["data_updated_at"],
+        "index_data_status": market_indices["data_status"],
     }
 
 
