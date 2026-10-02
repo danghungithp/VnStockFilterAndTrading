@@ -7,5 +7,5 @@
       "onAutoForward": "openBrowser"
     }
   },
-  "postStartCommand": "bash -lc 'cd /workspaces/VnStockFilterAndTrading && if [ ! -d .venv ]; then python -m venv .venv; fi && . .venv/bin/activate && pip install -r requirements.txt >/tmp/vnstock-pip.log 2>&1 && nohup python run.py >/tmp/vnstock.log 2>&1 & echo \"App started on port 5000\"'"
+  "postStartCommand": "bash -lc 'cd /workspaces/VnStockFilterAndTrading && if [ ! -d .venv ]; then python -m venv .venv; fi && . .venv/bin/activate && pip install -r requirements.txt >/tmp/vnstock-pip.log 2>&1 && (nohup python run.py >/tmp/vnstock.log 2>&1 </dev/null & echo $! >/tmp/vnstock.pid) && echo \"App started on port 5000\"'"
 }
