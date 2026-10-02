@@ -21,3 +21,18 @@ Use the stock-symbol search on the dashboard to analyze one listed HOSE/HNX symb
 The analysis also reports cup-and-handle, double-bottom, double-top, head-and-shoulders, morning-star, and inverse-head-and-shoulders setups. Cup-and-handle and morning-star signals require a 1.5x 20-session average-volume confirmation; reversal patterns remain watch signals until their neckline breaks, and inverse head-and-shoulders also requires lower right-shoulder volume. These are rule-based technical-pattern heuristics, not fundamental valuation or guaranteed forecasts.
 
 The recommendations page accepts an investment amount and calculates per-symbol amounts from the displayed half-Kelly allocation percentage. Allocation is capped per position and may leave some capital uninvested. Stop and target prices are volatility estimates, not guarantees or a substitute for a personal risk plan.
+
+## Deploy to Vercel
+
+The Flask application is exposed as a Python serverless function from `api/index.py`; `vercel.json` rewrites page and API routes to that function. Deploy from the repository root with the Vercel CLI (`vercel` for preview or `vercel --prod` for production).
+
+Set these project environment variables in Vercel before production use:
+
+```text
+MARKET_DATA_PROVIDER=yahoo
+YAHOO_TICKER_SUFFIX=VN
+YAHOO_MAX_SYMBOLS=5
+MARKET_DATA_CACHE_TTL=21600
+```
+
+Yahoo Finance does not require an API key. Vercel's `/tmp` SQLite cache is ephemeral and local to a serverless instance; it can speed warm requests but is not durable or shared between instances. Use external persistent storage if a shared cache across cold starts/instances is required. Yahoo/Vnstock network availability and the Vercel plan's function timeout/rate limits still apply.

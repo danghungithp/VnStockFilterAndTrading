@@ -9,7 +9,11 @@ _DEFAULT_CACHE_PATH = Path(__file__).resolve().parents[2] / "instance" / "market
 
 def _cache_path():
     configured = os.getenv("MARKET_DATA_CACHE_PATH", "").strip()
-    return Path(configured).expanduser() if configured else _DEFAULT_CACHE_PATH
+    if configured:
+        return Path(configured).expanduser()
+    if os.getenv("VERCEL"):
+        return Path("/tmp/vnstock-market-data.sqlite3")
+    return _DEFAULT_CACHE_PATH
 
 
 def load_market_cache(cache_key):

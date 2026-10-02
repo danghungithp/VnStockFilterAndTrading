@@ -3,5 +3,8 @@ __pycache__/
 .venv/
 .env
 instance/
+.vercel/
 *.pyc
 .DS_Store
+.vercel
+.env*

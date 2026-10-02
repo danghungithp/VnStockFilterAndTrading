@@ -1,4 +1,5 @@
 import pandas as pd
+from pathlib import Path
 
 import app.data.market_cache as market_cache
 import app.data.yahoo_finance as yahoo_finance
@@ -187,6 +188,13 @@ def test_sqlite_cache_survives_in_memory_cache_reset(monkeypatch, tmp_path):
     assert get_market_data() == market_data
     assert len(fetch_calls) == 1
     assert screening_service._market_data_cache_status == "disk"
+
+
+def test_market_cache_uses_tmp_directory_on_vercel(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("MARKET_DATA_CACHE_PATH", raising=False)
+
+    assert market_cache._cache_path() == Path("/tmp/vnstock-market-data.sqlite3")
 
 
 def test_refresh_uses_old_disk_cache_when_yahoo_is_unavailable(monkeypatch, tmp_path):
