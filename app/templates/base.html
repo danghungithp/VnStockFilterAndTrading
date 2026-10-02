@@ -4,6 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}VnStockFilterAndTrading{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}Công cụ lọc cổ phiếu Việt Nam theo xu hướng, mô hình kỹ thuật và tín hiệu mua bán từ dữ liệu giá Yahoo Finance.{% endblock %}" />
+    <meta name="keywords" content="lọc cổ phiếu tăng trưởng, lọc cổ phiếu giá trị, tín hiệu mua bán cổ phiếu, phân tích kỹ thuật cổ phiếu, cổ phiếu HOSE HNX, xu hướng giá cổ phiếu Việt Nam, Yahoo Finance" />
+    <meta name="robots" content="{% if 'app.github.dev' in request.host or 'localhost' in request.host or '127.0.0.1' in request.host %}noindex,nofollow{% else %}index,follow{% endif %}" />
+    {% if request.endpoint == 'recommendations_page' %}
+      <link rel="canonical" href="{{ url_for('recommendations_page', _external=True, _scheme='https') }}" />
+    {% else %}
+      <link rel="canonical" href="{{ url_for('dashboard', _external=True, _scheme='https') }}" />
+    {% endif %}
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="vi_VN" />
+    <meta property="og:site_name" content="VnStockFilter" />
+    <meta property="og:title" content="{% block og_title %}Lọc cổ phiếu Việt Nam | VnStockFilter{% endblock %}" />
+    <meta property="og:description" content="{% block og_description %}Phân tích kỹ thuật, mô hình giá và tín hiệu mua bán cổ phiếu HOSE/HNX.{% endblock %}" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+      {{ {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "VnStockFilter",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "vi-VN",
+        "description": self.meta_description()|striptags|trim,
+        "url": request.base_url
+      }|tojson }}
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />

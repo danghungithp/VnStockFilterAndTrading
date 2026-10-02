@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
 
-{% block title %}Dashboard - VnStockFilter{% endblock %}
+{% block title %}Lọc cổ phiếu tăng trưởng, giá trị | VnStockFilter{% endblock %}
+{% block meta_description %}Lọc cổ phiếu tăng trưởng và giá trị trên HOSE/HNX bằng xu hướng giá, mô hình nến và tín hiệu mua bán từ Yahoo Finance. Công cụ phân tích kỹ thuật, không thay thế định giá cơ bản.{% endblock %}
+{% block og_title %}Lọc cổ phiếu tăng trưởng, giá trị | VnStockFilter{% endblock %}
+{% block og_description %}Phân tích kỹ thuật cổ phiếu Việt Nam: xu hướng, mô hình giá, tín hiệu mua bán và quản trị vốn theo Kelly.{% endblock %}
 
 {% block content %}
   <section class="hero">
@@ -21,8 +24,8 @@
         {% endif %}
         <span class="badge">{{ overview.priced_count }}/{{ overview.universe_count }} mã có giá</span>
         {% if overview.data_status %}<p class="data-status" role="status">{{ overview.data_status }}</p>{% endif %}
-        <h1 style="margin-top: 1rem;">Bảng chấm điểm cổ phiếu Việt Nam</h1>
-        <p class="muted">Đánh giá dữ liệu giá bằng tín hiệu xu hướng và hồi quy về trung bình.</p>
+        <h1 style="margin-top: 1rem;">Lọc cổ phiếu tăng trưởng và giá trị Việt Nam</h1>
+        <p class="muted">Phân tích kỹ thuật cổ phiếu HOSE/HNX bằng xu hướng, mô hình nến và tín hiệu mua bán. Không thay thế định giá cơ bản doanh nghiệp.</p>
       </div>
       <div class="card">
         <p class="muted">Dữ liệu thị trường</p>

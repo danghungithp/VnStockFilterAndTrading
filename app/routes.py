@@ -1,6 +1,8 @@
 import re
 
-from flask import jsonify, redirect, render_template, request, url_for
+from xml.etree.ElementTree import Element, SubElement, tostring
+
+from flask import Response, jsonify, redirect, render_template, request, url_for
 
 from app.services.screening_service import (
     get_recommendations,
@@ -11,6 +13,28 @@ from app.services.screening_service import (
 
 
 def register_routes(app):
+    @app.route("/robots.txt")
+    def robots_txt():
+        sitemap_url = url_for("sitemap_xml", _external=True, _scheme="https")
+        content = (
+            "User-agent: *\n"
+            "Allow: /\n"
+            "Disallow: /market-data/refresh\n"
+            f"Sitemap: {sitemap_url}\n"
+        )
+        return Response(content, mimetype="text/plain")
+
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        sitemap = Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
+        for endpoint in ("dashboard", "recommendations_page"):
+            entry = SubElement(sitemap, "url")
+            SubElement(entry, "loc").text = url_for(endpoint, _external=True, _scheme="https")
+        return Response(
+            tostring(sitemap, encoding="utf-8", xml_declaration=True),
+            mimetype="application/xml",
+        )
+
     @app.route("/")
     def dashboard():
         overview = get_screening_summary()

@@ -1,7 +1,11 @@
+import json
+from io import BytesIO
+
 import pandas as pd
 from pathlib import Path
 
 import app.data.market_cache as market_cache
+import app.data.vietcap_listing as vietcap_listing
 import app.data.yahoo_finance as yahoo_finance
 import app.data.mock_market_data as mock_market_data
 import app.services.screening_service as screening_service
@@ -110,7 +114,7 @@ def test_yahoo_failure_does_not_fall_back_to_mock(monkeypatch, tmp_path):
     assert "Yahoo Finance" in summary["data_status"]
 
 
-def test_vnstock_listing_is_filtered_before_yahoo_history(monkeypatch):
+def test_vietcap_listing_is_filtered_before_yahoo_history(monkeypatch):
     listing = [
         {"symbol": "AAA", "exchange": "HSX", "type": "STOCK", "organ_name": "Company A"},
         {"symbol": "BBB", "exchange": "HNX", "type": "STOCK"},
@@ -119,7 +123,7 @@ def test_vnstock_listing_is_filtered_before_yahoo_history(monkeypatch):
     ]
     monkeypatch.setenv("YAHOO_MAX_SYMBOLS", "5")
     monkeypatch.delenv("YAHOO_SYMBOLS", raising=False)
-    monkeypatch.setattr(screening_service, "_fetch_vnstock_listing", lambda: listing)
+    monkeypatch.setattr(screening_service, "_fetch_vietcap_listing", lambda: listing)
     monkeypatch.setattr(
         screening_service,
         "_fetch_yahoo_history",
@@ -134,6 +138,36 @@ def test_vnstock_listing_is_filtered_before_yahoo_history(monkeypatch):
     assert {row["source"] for row in market_data} == {"yahoo"}
 
 
+def test_vietcap_http_listing_maps_exchange_and_company_names(monkeypatch):
+    payload = [
+        {
+            "symbol": "FPT",
+            "board": "HOSE",
+            "type": "STOCK",
+            "organName": "FPT Corporation",
+            "organShortName": "FPT",
+        }
+    ]
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/api/price/symbols/getAll")
+        assert request.get_header("Referer") == "https://trading.vietcap.com.vn/"
+        assert timeout == 4
+        return BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(vietcap_listing, "urlopen", fake_urlopen)
+
+    assert vietcap_listing.fetch_vietnam_listings(timeout=4) == [
+        {
+            "symbol": "FPT",
+            "exchange": "HOSE",
+            "type": "STOCK",
+            "organ_name": "FPT Corporation",
+            "organ_short_name": "FPT",
+        }
+    ]
+
+
 def test_requested_symbol_fetches_only_that_listing_entry(monkeypatch):
     listing = [
         {"symbol": "AAA", "exchange": "HSX", "type": "STOCK"},
@@ -141,7 +175,7 @@ def test_requested_symbol_fetches_only_that_listing_entry(monkeypatch):
     ]
     fetched_symbols = []
     monkeypatch.setenv("YAHOO_MAX_SYMBOLS", "5")
-    monkeypatch.setattr(screening_service, "_fetch_vnstock_listing", lambda: listing)
+    monkeypatch.setattr(screening_service, "_fetch_vietcap_listing", lambda: listing)
     monkeypatch.setattr(
         screening_service,
         "_fetch_yahoo_history",

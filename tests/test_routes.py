@@ -21,6 +21,33 @@ def test_health_endpoint():
     assert payload["status"] == "ok"
 
 
+def test_robots_and_sitemap_endpoints():
+    client = create_app().test_client()
+
+    robots = client.get("/robots.txt")
+    sitemap = client.get("/sitemap.xml")
+
+    assert robots.status_code == 200
+    assert b"Sitemap: https://localhost/sitemap.xml" in robots.data
+    assert b"Disallow: /market-data/refresh" in robots.data
+    assert sitemap.status_code == 200
+    assert b"<loc>https://localhost/</loc>" in sitemap.data
+    assert b"<loc>https://localhost/recommendations</loc>" in sitemap.data
+
+
+def test_dashboard_includes_seo_metadata_and_noindexes_codespaces_preview(monkeypatch):
+    _stub_market_data(monkeypatch)
+    client = create_app().test_client()
+
+    response = client.get("/", headers={"Host": "cuddly-spork-5000.app.github.dev"})
+
+    assert response.status_code == 200
+    assert "lọc cổ phiếu tăng trưởng".encode() in response.data.lower()
+    assert b"name=\"robots\" content=\"noindex,nofollow\"" in response.data
+    assert b"property=\"og:type\" content=\"website\"" in response.data
+    assert b"application/ld+json" in response.data
+
+
 def test_dashboard_labels_yahoo_live_data(monkeypatch):
     market_data = build_mock_market_data()
     for row in market_data:

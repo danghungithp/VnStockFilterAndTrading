@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
 
-{% block title %}Khuyến nghị - VnStockFilter{% endblock %}
+{% block title %}{% if requested_symbol %}Phân tích {{ requested_symbol }}{% else %}Tín hiệu mua bán cổ phiếu HOSE HNX{% endif %} | VnStockFilter{% endblock %}
+{% block meta_description %}Phân tích kỹ thuật cổ phiếu Việt Nam bằng xu hướng, mô hình nến, volume và tín hiệu mua bán. Dữ liệu lịch sử từ Yahoo Finance; kết quả mang tính tham khảo.{% endblock %}
+{% block og_title %}Phân tích kỹ thuật cổ phiếu Việt Nam | VnStockFilter{% endblock %}
+{% block og_description %}Theo dõi tín hiệu mua bán cổ phiếu HOSE/HNX, mô hình giá và tỷ trọng Kelly từ dữ liệu lịch sử.{% endblock %}
 
 {% block content %}
   <section class="hero">

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app.data.market_cache import load_market_cache, save_market_cache
 import app.data.mock_market_data as mock_market_data
+from app.data.vietcap_listing import fetch_vietnam_listings
 from app.data.yahoo_finance import fetch_daily_history, yahoo_ticker
 from app.strategies.chart_patterns import analyze_chart_patterns
 from app.strategies.mean_reversion import evaluate_mean_reversion_signal
@@ -40,10 +41,10 @@ _market_data_updated_at = None
 _market_data_cache_lock = threading.Lock()
 
 
-def _fetch_vnstock_listing():
-    from vnstock import Listing
-
-    return Listing(source="VCI", show_log=False).symbols_by_exchange()
+def _fetch_vietcap_listing():
+    return fetch_vietnam_listings(
+        timeout=float(os.getenv("LISTING_TIMEOUT", "10"))
+    )
 
 
 def _normalize_market_symbols(listing):
@@ -98,7 +99,7 @@ def _fetch_yahoo_history(stock):
 
 def _fetch_yahoo_market_data(requested_symbols=None):
     try:
-        symbols = _normalize_market_symbols(_fetch_vnstock_listing())
+        symbols = _normalize_market_symbols(_fetch_vietcap_listing())
     except Exception:
         return [], 0
     if not symbols:
