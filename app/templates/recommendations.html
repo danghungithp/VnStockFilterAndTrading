@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+
+{% block title %}Khuyến nghị - VnStockFilter{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <h1>Khuyến nghị đầu tư</h1>
+    <p class="muted">Top 5 mã xếp theo mức đồng thuận giữa Trend Following và Mean Reversion.</p>
+  </section>
+
+  <section class="card" style="margin-top: 1.5rem;">
+    <div class="grid">
+      <div>
+        <p class="muted">Tỷ trọng cố định</p>
+        <div class="metric">{{ fixed_allocation }}%</div>
+      </div>
+      <div>
+        <p class="muted">Đồng thuận mua</p>
+        <div class="metric">10–20%</div>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <table>
+      <thead>
+        <tr>
+          <th>Hạng</th>
+          <th>Mã</th>
+          <th>Trend</th>
+          <th>Mean Reversion</th>
+          <th>Tín hiệu</th>
+          <th>% giải ngân</th>
+          <th>Giải thích</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in recommendations %}
+          <tr>
+            <td>{{ item.rank }}</td>
+            <td>{{ item.symbol }}</td>
+            <td>{{ item.trend_signal }}</td>
+            <td>{{ item.mean_reversion_signal }}</td>
+            <td>{{ item.recommendation }}</td>
+            <td>{{ item.allocation_percent }}%</td>
+            <td>{{ item.thesis }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section style="margin-top: 1.5rem;">
+    <p>Trend Following: giá đóng cửa phiên cuối so với phiên đầu trong tối đa 100 phiên; Bullish từ +5%, Bearish từ -3%.</p>
+    <p>Mean Reversion: trung bình 5 phiên gần nhất so với phần lịch sử trước đó; Oversold từ -4%, Extended từ +4%. Nếu chỉ có tối đa 5 phiên, ngưỡng Oversold là -7%.</p>
+    <p class="muted">Tối đa 20% khi hai chiến lược cùng tích cực; 10% khi một tín hiệu tích cực và tín hiệu còn lại trung tính. Chỉ Top 5 mã mua được phân bổ, tổng tối đa 100%; đây là quy tắc lọc, không phải tỷ trọng Kelly hay lời khuyên đầu tư cá nhân hóa.</p>
+  </section>
+{% endblock %}

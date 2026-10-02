@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - VnStockFilter{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <div class="grid">
+      <div>
+        <span class="badge">{% if overview.source == 'vnstock' %}VNStock • HOSE + HNX{% else %}Dữ liệu mô phỏng{% endif %} • {{ overview.priced_count }}/{{ overview.universe_count }} mã có giá</span>
+        <h1 style="margin-top: 1rem;">Bảng chấm điểm cổ phiếu Việt Nam</h1>
+        <p class="muted">Quét cổ phiếu HOSE và HNX bằng VNStock; tín hiệu kết hợp xu hướng giá và hồi quy về trung bình.</p>
+      </div>
+      <div class="card">
+        <p class="muted">Cập nhật</p>
+        <div class="metric">{{ overview.generated_at[:10] }}</div>
+        <small class="muted">{{ overview.generated_at }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid" style="margin-top: 1.25rem;">
+    <article class="card">
+      <p class="muted">Trend Following</p>
+      <div class="metric">{{ overview.strategy_summary.trend_following.bullish }}</div>
+      <small class="pill-positive">Tín hiệu Bullish</small>
+    </article>
+    <article class="card">
+      <p class="muted">Mean Reversion</p>
+      <div class="metric">{{ overview.strategy_summary.mean_reversion.oversold }}</div>
+      <small class="pill-warning">Tín hiệu Oversold</small>
+    </article>
+    <article class="card">
+      <p class="muted">Tổng vị thế</p>
+      <div class="metric">{{ overview.total_positions }}</div>
+      <small class="muted">Mã đang được đánh giá</small>
+    </article>
+    <article class="card">
+      <p class="muted">Phân bổ</p>
+      <div class="metric">{{ fixed_allocation }}%</div>
+      <small class="muted">Tối đa mỗi mã khi hai tín hiệu đồng thuận mua</small>
+    </article>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <h2>Tín hiệu toàn thị trường</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Mã</th>
+          <th>Sàn</th>
+          <th>Trend</th>
+          <th>Mean Reversion</th>
+          <th>Khuyến nghị</th>
+          <th>Giải ngân</th>
+          <th>Lý do</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in overview.stocks %}
+          <tr>
+            <td><strong>{{ row.symbol }}</strong></td>
+            <td>{{ row.exchange or 'Demo' }}</td>
+            <td>{{ row.trend_signal }} ({{ row.trend_momentum }}%)</td>
+            <td>{{ row.mean_reversion_signal }} ({{ row.mean_reversion_momentum }}%)</td>
+            <td>
+              {% if row.recommendation == 'Buy' %}<span class="pill-positive">Mua</span>
+              {% elif row.recommendation == 'Sell' %}<span class="pill-warning">Bán</span>
+              {% else %}<span class="pill-neutral">Theo dõi</span>
+              {% endif %}
+            </td>
+            <td>{{ row.allocation_percent }}%</td>
+            <td>{{ row.reason }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <h2>Khuyến nghị đầu tư</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Hạng</th>
+          <th>Mã</th>
+          <th>Trend</th>
+          <th>Mean Reversion</th>
+          <th>Khuyến nghị</th>
+          <th>Giải ngân</th>
+          <th>Lý do</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in recommendations %}
+          <tr>
+            <td>{{ row.rank }}</td>
+            <td>{{ row.symbol }}</td>
+            <td>{{ row.trend_signal }}</td>
+            <td>{{ row.mean_reversion_signal }}</td>
+            <td>{{ row.recommendation }}</td>
+            <td>{{ row.allocation_percent }}%</td>
+            <td>{{ row.thesis }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <h2>Tiêu chí lọc</h2>
+    <div class="card">
+      <p>Trend Following: so sánh giá đóng cửa phiên đầu và cuối trong tối đa 100 phiên; Bullish từ +5%, Bearish từ -3%, còn lại là Neutral.</p>
+      <p>Mean Reversion: so sánh trung bình 5 phiên gần nhất với các phiên trước; Oversold từ -4%, Extended từ +4%. Với dữ liệu tối đa 5 phiên, ngưỡng Oversold là -7%.</p>
+      <p>Giải ngân theo từng mã: tối đa 20% khi cả hai tín hiệu tích cực, 10% khi một tín hiệu tích cực và tín hiệu kia trung tính. Tỷ trọng chỉ dành cho Top 5 mã mua, tổng tối đa 100%.</p>
+      <p class="muted">Nguồn mô phỏng được dùng khi VNStock không trả dữ liệu; tín hiệu chỉ dựa trên giá đóng cửa, chưa xét thanh khoản, phí, sức mua hoặc mức chịu rủi ro.</p>
+    </div>
+  </section>
+{% endblock %}

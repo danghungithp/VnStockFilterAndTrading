@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}VnStockFilterAndTrading{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pico.css@2.0.6/css/pico.min.css" />
+    <style>
+      :root {
+        --primary: #22c55e;
+        --accent: #f59e0b;
+        --surface: #0f172a;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --border: #334155;
+      }
+
+      body {
+        background: linear-gradient(180deg, #020817, #0f172a 20%, #111827 100%);
+        color: var(--text);
+      }
+
+      nav {
+        border-bottom: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.9);
+      }
+
+      .hero {
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        background: rgba(15, 23, 42, 0.82);
+        padding: 2rem;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--primary);
+        border: 1px solid rgba(34, 197, 94, 0.35);
+      }
+
+      .card {
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 1rem;
+      }
+
+      .metric {
+        font-size: 1.6rem;
+        font-weight: 700;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      table th,
+      table td {
+        font-size: 0.92rem;
+      }
+
+      .pill-positive {
+        color: var(--primary);
+      }
+
+      .pill-warning {
+        color: var(--accent);
+      }
+
+      .pill-neutral {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="container-fluid">
+      <ul>
+        <li><strong>VnStockFilter</strong></li>
+      </ul>
+      <ul>
+        <li><a href="/">Tổng quan</a></li>
+        <li><a href="/recommendations">Khuyến nghị</a></li>
+      </ul>
+    </nav>
+    <main class="container" style="padding-top: 1.5rem; padding-bottom: 3rem;">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
