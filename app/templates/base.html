@@ -4,32 +4,193 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}VnStockFilterAndTrading{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pico.css@2.0.6/css/pico.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --primary: #22c55e;
-        --accent: #f59e0b;
-        --surface: #0f172a;
-        --text: #e2e8f0;
-        --muted: #94a3b8;
-        --border: #334155;
+        color-scheme: light;
+        --primary: #087f68;
+        --primary-dark: #066452;
+        --accent: #b87916;
+        --surface: #ffffff;
+        --canvas: #f3f6f5;
+        --text: #172923;
+        --muted: #65766f;
+        --border: #dce5e1;
+        --negative: #bd4d44;
+        --pico-font-family: "DM Sans", sans-serif;
+        --pico-background-color: var(--canvas);
+        --pico-color: var(--text);
+        --pico-primary: var(--primary);
+        --pico-primary-hover: var(--primary-dark);
+        --pico-border-color: var(--border);
       }
 
+      * { box-sizing: border-box; }
+
       body {
-        background: linear-gradient(180deg, #020817, #0f172a 20%, #111827 100%);
+        margin: 0;
+        background: var(--canvas);
         color: var(--text);
+        font-family: "DM Sans", sans-serif;
+        line-height: 1.5;
       }
 
       nav {
         border-bottom: 1px solid var(--border);
-        background: rgba(15, 23, 42, 0.9);
+        background: var(--surface);
+      }
+
+      nav.container-fluid {
+        display: flex;
+        min-height: 4.25rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.5rem max(1rem, calc((100vw - 1440px) / 2));
+      }
+
+      nav ul {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      nav a {
+        color: var(--muted);
+        font-size: 0.9rem;
+        text-decoration: none;
+      }
+
+      nav a:hover { color: var(--primary); }
+
+      nav form { margin: 0; }
+
+      .brand {
+        color: var(--text);
+        font-size: 1rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .refresh-button {
+        min-height: 2.4rem;
+        padding: 0.5rem 0.85rem;
+        border: 1px solid var(--primary);
+        border-radius: 4px;
+        background: var(--primary);
+        color: #fff;
+        font: inherit;
+        font-size: 0.84rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .refresh-button:hover {
+        border-color: var(--primary-dark);
+        background: var(--primary-dark);
+      }
+
+      .refresh-button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+      }
+
+      .stock-search {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 0.8rem;
+        margin: 1rem 0;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--surface);
+      }
+
+      .stock-search label {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+
+      .stock-search input {
+        width: 100%;
+        min-height: 2.65rem;
+        padding: 0.55rem 0.75rem;
+        border: 1px solid #b8c8c1;
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+      }
+
+      .stock-search button {
+        min-height: 2.65rem;
+        padding: 0.55rem 1rem;
+        border: 1px solid var(--primary);
+        border-radius: 4px;
+        background: var(--primary);
+        color: white;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .stock-search button:hover {
+        border-color: var(--primary-dark);
+        background: var(--primary-dark);
       }
 
       .hero {
-        border: 1px solid var(--border);
-        border-radius: 1rem;
-        background: rgba(15, 23, 42, 0.82);
-        padding: 2rem;
+        padding: 1.5rem 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .hero h1 {
+        margin: 0.75rem 0 0.35rem;
+        font-size: 1.75rem;
+        line-height: 1.2;
+      }
+
+      .hero p { margin: 0.35rem 0 0.75rem; }
+
+      .page-shell {
+        width: min(100% - 2rem, 1440px);
+        margin: 0 auto;
+        padding: 1.25rem 0 3rem;
+      }
+
+      h2 {
+        margin: 0 0 0.8rem;
+        font-size: 1.15rem;
+      }
+
+      h3 {
+        margin: 0;
+        font-size: 0.95rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .grid > * { min-width: 0; }
+
+      .section-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1rem;
+        margin: 1.75rem 0 0.75rem;
       }
 
       .badge {
@@ -37,16 +198,206 @@
         align-items: center;
         gap: 0.5rem;
         padding: 0.35rem 0.7rem;
-        border-radius: 999px;
-        background: rgba(34, 197, 94, 0.12);
+        border-radius: 4px;
+        background: #e7f3ef;
         color: var(--primary);
-        border: 1px solid rgba(34, 197, 94, 0.35);
+        border: 1px solid #c5e1d8;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.76rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .data-source {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.35rem 0.65rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+
+      .data-source::before {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 50%;
+        content: "";
+      }
+
+      .data-source-live {
+        color: #087f68;
+        border-color: #9fcec0;
+        background: #e7f3ef;
+      }
+
+      .data-source-live::before {
+        background: #087f68;
+      }
+
+      .data-source-demo {
+        color: #80510b;
+        border-color: #e5ce9f;
+        background: #fff7e8;
+      }
+
+      .data-source-demo::before {
+        background: #b87916;
+      }
+
+      .data-source-cache {
+        color: #3d6070;
+        border-color: #bfd2d9;
+        background: #eff6f7;
+      }
+
+      .data-source-cache::before { background: #4d8291; }
+
+      .data-source-unavailable {
+        color: #a13731;
+        border-color: #e5b9b4;
+        background: #fff0ee;
+      }
+
+      .data-source-unavailable::before {
+        background: #bd4d44;
+      }
+
+      .data-status {
+        color: #a13731;
+        margin: 0.75rem 0;
+      }
+
+      .summary-link {
+        display: block;
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .summary-link:hover,
+      .summary-link:focus-visible {
+        border-color: var(--primary);
+        color: inherit;
+      }
+
+      .summary-link-action {
+        display: inline-block;
+        margin-top: 0.65rem;
+        color: var(--primary);
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+      }
+
+      .risk-table {
+        min-width: 1350px;
+      }
+
+      .capital-panel {
+        display: grid;
+        grid-template-columns: minmax(15rem, 0.8fr) minmax(20rem, 1.2fr);
+        align-items: end;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--primary);
+        border-radius: 4px;
+        background: var(--surface);
+      }
+
+      .capital-panel label {
+        margin-bottom: 0.4rem;
+        font-weight: 700;
+      }
+
+      .capital-panel input {
+        margin-bottom: 0;
+        background: var(--surface);
+        border-color: #b8c8c1;
+      }
+
+      .capital-summary {
+        min-height: 5rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid #c5e1d8;
+        border-radius: 4px;
+        background: #f2faf7;
+      }
+
+      .capital-summary output {
+        display: block;
+        margin-top: 0.25rem;
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .recommendation-table {
+        min-width: 1550px;
+      }
+
+      .recommendation-table thead th {
+        background: #e7f3ef;
+        color: #164b3f;
+        border-bottom: 2px solid var(--primary);
+      }
+
+      .recommendation-table tbody tr:nth-child(even) {
+        background: #f6f9f8;
+      }
+
+      .recommendation-table tbody tr:hover {
+        background: #edf7f3;
+      }
+
+      .allocation-weight {
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .capital-allocation {
+        color: #80510b;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .pattern-list {
+        display: grid;
+        min-width: 250px;
+        gap: 0.4rem;
+      }
+
+      .pattern-item {
+        padding-left: 0.55rem;
+        border-left: 2px solid var(--border);
+      }
+
+      .pattern-label {
+        display: block;
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+
+      .pattern-buy { color: var(--primary-dark); border-color: var(--primary); }
+      .pattern-sell { color: var(--negative); border-color: var(--negative); }
+      .pattern-watch { color: #80510b; border-color: var(--accent); }
+      .pattern-none { color: var(--muted); }
+
+      .pattern-detail {
+        display: block;
+        color: var(--muted);
+        font-size: 0.73rem;
+        line-height: 1.35;
       }
 
       .card {
-        background: rgba(15, 23, 42, 0.8);
+        background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 1rem;
+        border-radius: 4px;
         padding: 1rem;
       }
 
@@ -59,6 +410,72 @@
         color: var(--muted);
       }
 
+      .metric,
+      .numeric {
+        font-family: "IBM Plex Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .status-message {
+        margin: 0.75rem 0;
+        padding: 0.65rem 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .status-message-success {
+        border-color: #a9d4c5;
+        background: #edf8f3;
+        color: #145947;
+      }
+
+      .status-message-warning {
+        border-color: #e5ce9f;
+        background: #fff7e8;
+        color: #80510b;
+      }
+
+      .status-message-error {
+        border-color: #e5b9b4;
+        background: #fff0ee;
+        color: #a13731;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        min-height: 2.65rem;
+        padding: 0.55rem 0.75rem;
+        border: 1px solid #b8c8c1;
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+      }
+
+      th, td {
+        padding: 0.7rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      td { font-size: 0.86rem; }
+
       table th,
       table td {
         font-size: 0.92rem;
@@ -66,14 +483,36 @@
 
       .pill-positive {
         color: var(--primary);
+        font-weight: 700;
       }
 
       .pill-warning {
-        color: var(--accent);
+        color: var(--negative);
+        font-weight: 700;
       }
 
       .pill-neutral {
         color: var(--muted);
+      }
+
+      @media (max-width: 700px) {
+        nav.container-fluid { flex-wrap: wrap; }
+        nav ul { gap: 0.7rem; }
+        .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .stock-search { grid-template-columns: 1fr; }
+        .capital-panel {
+          grid-template-columns: 1fr;
+        }
+        .section-heading { align-items: start; flex-direction: column; }
+      }
+
+      @media (max-width: 440px) {
+        nav.container-fluid { padding-inline: 0.75rem; }
+        nav ul { gap: 0.5rem; }
+        .brand { font-size: 0.88rem; }
+        .refresh-button { padding: 0.45rem 0.6rem; font-size: 0.76rem; }
+        .grid { gap: 0.5rem; }
+        .page-shell { width: min(100% - 1.25rem, 1440px); }
       }
     </style>
   </head>
@@ -86,9 +525,23 @@
         <li><a href="/">Tổng quan</a></li>
         <li><a href="/recommendations">Khuyến nghị</a></li>
       </ul>
+      <form class="refresh-form" action="{{ url_for('refresh_market_data_route') }}" method="post">
+        <input type="hidden" name="return_to" value="{{ request.endpoint if request.endpoint in ['dashboard', 'recommendations_page'] else 'dashboard' }}" />
+        {% if request.endpoint == 'recommendations_page' and request.args.get('symbol') %}<input type="hidden" name="symbol" value="{{ request.args.get('symbol') }}" />{% endif %}
+        <button class="refresh-button" type="submit">Cập nhật dữ liệu</button>
+      </form>
     </nav>
-    <main class="container" style="padding-top: 1.5rem; padding-bottom: 3rem;">
+    <main class="page-shell">
       {% block content %}{% endblock %}
     </main>
+    <script>
+      document.querySelectorAll(".refresh-form").forEach((form) => {
+        form.addEventListener("submit", () => {
+          const button = form.querySelector("button[type='submit']");
+          button.disabled = true;
+          button.textContent = "Đang tải dữ liệu...";
+        });
+      });
+    </script>
   </body>
 </html>

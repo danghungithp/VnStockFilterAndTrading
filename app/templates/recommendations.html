@@ -4,25 +4,67 @@
 
 {% block content %}
   <section class="hero">
-    <h1>Khuyến nghị đầu tư</h1>
-    <p class="muted">Top 5 mã xếp theo mức đồng thuận giữa Trend Following và Mean Reversion.</p>
+    <h1>{% if requested_symbol %}Phân tích mã {{ requested_symbol }}{% else %}Khuyến nghị đầu tư{% endif %}</h1>
+    <p class="muted">{% if requested_symbol %}Yahoo Finance history · cùng bộ lọc Trend Following, Mean Reversion và Kelly.{% else %}Top 5 mã xếp theo mức đồng thuận giữa Trend Following và Mean Reversion.{% endif %}</p>
+    {% if cache_status == 'stale' %}
+      <span class="data-source data-source-unavailable">STALE · cache cũ từ Yahoo</span>
+    {% elif cache_status == 'disk' %}
+      <span class="data-source data-source-cache">CACHE · Yahoo Finance</span>
+    {% elif data_source == 'yahoo' %}
+      <span class="data-source data-source-live">LIVE · Yahoo Finance · dữ liệu ngày</span>
+    {% elif data_source == 'mixed' %}
+      <span class="data-source data-source-demo">LIVE API + DEMO · dữ liệu pha trộn</span>
+    {% elif data_source == 'unavailable' %}
+      <span class="data-source data-source-unavailable">YAHOO UNAVAILABLE · không có giá live</span>
+    {% else %}
+      <span class="data-source data-source-demo">DEMO · dữ liệu mô phỏng</span>
+    {% endif %}
+    <span class="badge">{{ priced_count }}/{{ universe_count }} mã có giá</span>
+    {% if data_status %}<p class="data-status" role="status">{{ data_status }}</p>{% endif %}
+    {% if refresh_result == 'success' %}<p class="status-message status-message-success" role="status">Đã tải và lưu dữ liệu mới.</p>
+    {% elif refresh_result == 'stale' %}<p class="status-message status-message-warning" role="status">Yahoo chưa phản hồi; đang dùng snapshot cache cũ.</p>
+    {% elif refresh_result == 'unavailable' %}<p class="status-message status-message-error" role="alert">Không tải được giá mới và không có cache để dùng.</p>{% endif %}
+    <small class="muted">
+      {% if cache_status == 'live' %}Vừa tải trực tiếp từ Yahoo{% elif cache_status == 'disk' %}Đang đọc cache trên đĩa{% elif cache_status == 'stale' %}Đang dùng cache cũ do Yahoo chưa phản hồi{% elif cache_status == 'demo' %}Đang dùng dữ liệu demo{% else %}Chưa có snapshot dữ liệu{% endif %}
+      {% if data_updated_at %} · {{ data_updated_at }} UTC{% endif %}
+    </small>
   </section>
+
+  <form class="stock-search" action="{{ url_for('recommendations_page') }}" method="get">
+    <div>
+      <label for="recommendation-symbol">Mã cổ phiếu HOSE/HNX</label>
+      <input id="recommendation-symbol" name="symbol" type="search" minlength="1" maxlength="10" pattern="[A-Za-z0-9]{1,10}" value="{{ requested_symbol }}" placeholder="Nhập mã, ví dụ FPT" required />
+    </div>
+    <button type="submit">Phân tích mã</button>
+  </form>
 
   <section class="card" style="margin-top: 1.5rem;">
     <div class="grid">
       <div>
-        <p class="muted">Tỷ trọng cố định</p>
+        <p class="muted">Giới hạn tối đa mỗi mã</p>
         <div class="metric">{{ fixed_allocation }}%</div>
       </div>
       <div>
-        <p class="muted">Đồng thuận mua</p>
-        <div class="metric">10–20%</div>
+        <p class="muted">Phương pháp định cỡ</p>
+        <div class="metric">½ Kelly</div>
       </div>
     </div>
   </section>
 
+  <section class="capital-panel" aria-labelledby="capital-title">
+    <div>
+      <label id="capital-title" for="capital-input">Vốn đầu tư (VND)</label>
+      <input id="capital-input" type="text" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="Nhập số vốn, ví dụ 100,000,000" />
+    </div>
+    <div class="capital-summary">
+      <span class="muted">Phân bổ theo tỷ lệ Kelly</span>
+      <output id="capital-summary" aria-live="polite">Nhập vốn để tính số tiền cho từng mã.</output>
+    </div>
+  </section>
+
   <section style="margin-top: 2rem;">
-    <table>
+    <div class="table-scroll">
+    <table class="recommendation-table">
       <thead>
         <tr>
           <th>Hạng</th>
@@ -30,28 +72,103 @@
           <th>Trend</th>
           <th>Mean Reversion</th>
           <th>Tín hiệu</th>
-          <th>% giải ngân</th>
+          <th>Mô hình kỹ thuật</th>
+          <th>½ Kelly thực tế</th>
+          <th>Tiền phân bổ</th>
+          <th>Cắt lỗ · 2σ</th>
+          <th>Chốt lời · 2R</th>
           <th>Giải thích</th>
         </tr>
       </thead>
       <tbody>
         {% for item in recommendations %}
-          <tr>
+          <tr data-kelly-percent="{{ item.allocation_percent }}">
             <td>{{ item.rank }}</td>
             <td>{{ item.symbol }}</td>
             <td>{{ item.trend_signal }}</td>
             <td>{{ item.mean_reversion_signal }}</td>
             <td>{{ item.recommendation }}</td>
-            <td>{{ item.allocation_percent }}%</td>
+            <td>
+              <div class="pattern-list">
+                {% for pattern in item.chart_patterns %}
+                  <div class="pattern-item {% if pattern.signal == 'Mua' %}pattern-buy{% elif pattern.signal == 'Bán' %}pattern-sell{% elif pattern.signal == 'Theo dõi' %}pattern-watch{% else %}pattern-none{% endif %}">
+                    <span class="pattern-label">{{ pattern.name }} · {{ pattern.signal }}</span>
+                    <small class="pattern-detail">{{ pattern.message }}{% if pattern.neckline is not none %} Neckline {{ '%.2f'|format(pattern.neckline) }}.{% endif %}{% if pattern.support is not none %} Hỗ trợ {{ '%.2f'|format(pattern.support) }}.{% endif %}{% if pattern.volume_ratio is not none %} Volume {{ pattern.volume_ratio }}× {{ pattern.volume_basis }}.{% endif %}</small>
+                  </div>
+                {% endfor %}
+              </div>
+            </td>
+            <td class="allocation-weight">{{ item.allocation_percent }}%</td>
+            <td class="capital-allocation" data-allocation-amount>Nhập vốn</td>
+            <td>{% if item.stop_loss_price is not none %}{{ '%.2f'|format(item.stop_loss_price) }}{% else %}—{% endif %}</td>
+            <td>{% if item.take_profit_price is not none %}{{ '%.2f'|format(item.take_profit_price) }}{% else %}—{% endif %}</td>
             <td>{{ item.thesis }}</td>
           </tr>
+        {% else %}
+          <tr><td colspan="11" class="muted">Không có khuyến nghị để phân bổ từ nguồn dữ liệu hiện tại.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
   <section style="margin-top: 1.5rem;">
     <p>Trend Following: giá đóng cửa phiên cuối so với phiên đầu trong tối đa 100 phiên; Bullish từ +5%, Bearish từ -3%.</p>
     <p>Mean Reversion: trung bình 5 phiên gần nhất so với phần lịch sử trước đó; Oversold từ -4%, Extended từ +4%. Nếu chỉ có tối đa 5 phiên, ngưỡng Oversold là -7%.</p>
-    <p class="muted">Tối đa 20% khi hai chiến lược cùng tích cực; 10% khi một tín hiệu tích cực và tín hiệu còn lại trung tính. Chỉ Top 5 mã mua được phân bổ, tổng tối đa 100%; đây là quy tắc lọc, không phải tỷ trọng Kelly hay lời khuyên đầu tư cá nhân hóa.</p>
+    <p>Cốc tay cầm cần tối thiểu 60 phiên cấu trúc; breakout mua hoặc thủng hỗ trợ bán chỉ xác nhận khi volume phiên cuối đạt ít nhất 1.5× trung bình 20 phiên. Hai đáy mua khi vượt neckline; hai đỉnh và vai đầu vai bán khi đóng cửa thủng neckline.</p>
+    <p>Sao Mai dùng ba nến ngày: nến giảm mạnh, nến thân nhỏ/doji, nến tăng mạnh đóng trên vùng thân nến đầu; chỉ xác nhận mua khi volume nến thứ ba đạt ít nhất 1.5× trung bình 20 phiên. Vai đầu vai ngược xác nhận mua khi vượt neckline và volume trung bình quanh vai phải thấp hơn vai trái và đầu.</p>
+    <p class="muted">Các mẫu hình là heuristic kỹ thuật trên giá/volume ngày, không phải định giá cơ bản hoặc bảo đảm dự báo. Dữ liệu Yahoo có thể thiếu volume cho một số mã; khi thiếu, cốc tay cầm không phát tín hiệu xác nhận.</p>
+    <p class="muted">Tỷ trọng dùng ½ Kelly với p là tỷ lệ phiên tăng, b là lãi trung bình/lỗ trung bình lịch sử; cần tối thiểu 20 phiên, 5 phiên tăng và 5 phiên giảm. Giới hạn 20% mỗi mã, chỉ Top 5 mã Mua, tổng tối đa 100%. Cắt lỗ 2σ và chốt lời 2R là quy tắc biến động của ứng dụng, không phải mức giá do Edward Thorp quy định.</p>
   </section>
+  <script>
+    (() => {
+      const capitalInput = document.querySelector("#capital-input");
+      const summary = document.querySelector("#capital-summary");
+      const allocationRows = document.querySelectorAll("[data-kelly-percent]");
+      const money = new Intl.NumberFormat("vi-VN", {
+        style: "currency",
+        currency: "VND",
+        maximumFractionDigits: 0,
+      });
+      const inputNumber = new Intl.NumberFormat("en-US", {
+        maximumFractionDigits: 0,
+      });
+      const percent = new Intl.NumberFormat("vi-VN", {
+        maximumFractionDigits: 2,
+      });
+
+      function updateAllocations() {
+        const capital = Number(capitalInput.value.replace(/[^0-9]/g, ""));
+        if (!Number.isFinite(capital) || capital <= 0) {
+          for (const row of allocationRows) {
+            row.querySelector("[data-allocation-amount]").textContent = "Nhập vốn";
+          }
+          summary.textContent = "Nhập vốn để tính số tiền cho từng mã.";
+          return;
+        }
+
+        let allocatedPercent = 0;
+        for (const row of allocationRows) {
+          const allocationPercent = Number(row.dataset.kellyPercent) || 0;
+          const allocationAmount = capital * allocationPercent / 100;
+          allocatedPercent += allocationPercent;
+          row.querySelector("[data-allocation-amount]").textContent = money.format(allocationAmount);
+        }
+
+        const allocatedAmount = capital * allocatedPercent / 100;
+        const remainingAmount = Math.max(0, capital - allocatedAmount);
+        summary.textContent = `Đã phân bổ ${money.format(allocatedAmount)} (${percent.format(allocatedPercent)}%) · còn lại ${money.format(remainingAmount)}.`;
+      }
+
+      capitalInput.addEventListener("input", updateAllocations);
+      capitalInput.addEventListener("focus", () => {
+        capitalInput.value = capitalInput.value.replace(/[^0-9]/g, "");
+      });
+      capitalInput.addEventListener("blur", () => {
+        const capital = Number(capitalInput.value.replace(/[^0-9]/g, ""));
+        if (Number.isFinite(capital) && capital > 0) {
+          capitalInput.value = inputNumber.format(capital);
+        }
+      });
+    })();
+  </script>
 {% endblock %}

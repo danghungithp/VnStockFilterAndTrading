@@ -1,10 +1,16 @@
 import os
+import json
+import sqlite3
+import statistics
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from app.data.market_cache import load_market_cache, save_market_cache
 import app.data.mock_market_data as mock_market_data
+from app.data.yahoo_finance import fetch_daily_history, yahoo_ticker
+from app.strategies.chart_patterns import analyze_chart_patterns
 from app.strategies.mean_reversion import evaluate_mean_reversion_signal
 from app.strategies.trend_following import evaluate_trend_signal
 
@@ -18,9 +24,19 @@ SCORES = {
 }
 
 _CACHE_TTL_SECONDS = 900
+_YAHOO_CACHE_TTL_SECONDS = 21600
+_MARKET_CACHE_VERSION = 3
+_MIN_KELLY_RETURNS = 20
+_MIN_KELLY_OUTCOMES = 5
+_MAX_POSITION_ALLOCATION_PERCENT = 20
 _market_data_cache = None
 _market_data_cache_at = 0.0
 _market_universe_count = 0
+_market_data_source = "unavailable"
+_market_data_error = None
+_market_data_cache_key = None
+_market_data_cache_status = "unavailable"
+_market_data_updated_at = None
 _market_data_cache_lock = threading.Lock()
 
 
@@ -42,12 +58,12 @@ def _normalize_market_symbols(listing):
     else:
         records = listing or []
 
-    symbols = []
+    normalized = []
     seen = set()
     for item in records:
         if not isinstance(item, dict):
             continue
-        exchange = str(item.get("exchange", "")).upper()
+        exchange = str(item.get("exchange", "")).strip().upper()
         if exchange not in {"HSX", "HOSE", "HNX"}:
             continue
         if item.get("type") and str(item["type"]).upper() != "STOCK":
@@ -56,73 +72,266 @@ def _normalize_market_symbols(listing):
         if not symbol or symbol in seen:
             continue
         seen.add(symbol)
-        symbols.append(
+        normalized.append(
             {
                 "symbol": symbol,
                 "name": item.get("organ_name") or item.get("organ_short_name") or symbol,
                 "exchange": "HOSE" if exchange in {"HSX", "HOSE"} else "HNX",
             }
         )
-    return symbols
+    return normalized
 
 
-def _fetch_vnstock_history(stock):
+def _fetch_yahoo_history(stock):
+    ticker = yahoo_ticker(stock["symbol"], stock.get("exchange"))
     try:
-        quote_class = mock_market_data._load_vnstock_quote()
-        prices = mock_market_data._fetch_vnstock_close_prices(quote_class, stock["symbol"])
+        history = fetch_daily_history(
+            ticker,
+            timeout=float(os.getenv("YAHOO_TIMEOUT", "10")),
+        )
     except Exception:
         return None
-    if not prices:
+    if not history["close_prices"]:
         return None
-    return {**stock, "close_prices": prices, "source": "vnstock"}
+    return {**stock, **history, "source": "yahoo", "provider_symbol": ticker}
 
 
-def _fetch_vnstock_market_data():
+def _fetch_yahoo_market_data(requested_symbols=None):
     try:
         symbols = _normalize_market_symbols(_fetch_vnstock_listing())
     except Exception:
         return [], 0
-
     if not symbols:
         return [], 0
 
-    with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as executor:
-        results = list(executor.map(_fetch_vnstock_history, symbols))
-    return [row for row in results if row], len(symbols)
+    universe_count = len(symbols)
+    configured_symbols = os.getenv(
+        "YAHOO_SYMBOLS", os.getenv("ALPHA_VANTAGE_SYMBOLS", "")
+    ).strip()
+    if requested_symbols:
+        requested = {symbol.strip().upper() for symbol in requested_symbols}
+        symbols = [item for item in symbols if item["symbol"] in requested]
+    elif configured_symbols:
+        configured = {symbol.strip().upper() for symbol in configured_symbols.split(",") if symbol.strip()}
+        symbols = [item for item in symbols if item["symbol"] in configured]
+    max_symbols = max(
+        1,
+        int(os.getenv("YAHOO_MAX_SYMBOLS", os.getenv("ALPHA_VANTAGE_MAX_SYMBOLS", "5"))),
+    )
+    symbols = symbols[:max_symbols]
+    if not symbols:
+        return [], universe_count
+
+    max_workers = max(1, min(int(os.getenv("YAHOO_MAX_WORKERS", "5")), len(symbols)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(
+            executor.map(
+                _fetch_yahoo_history,
+                symbols,
+            )
+        )
+    return [row for row in results if row], universe_count
 
 
-def get_market_data():
+def _calculate_risk_metrics(prices):
+    valid_prices = []
+    for price in prices:
+        try:
+            value = float(price)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value < float("inf"):
+            valid_prices.append(value)
+
+    returns = [
+        (current - previous) / previous
+        for previous, current in zip(valid_prices, valid_prices[1:])
+    ]
+    metrics = {
+        "win_probability_percent": None,
+        "payoff_ratio": None,
+        "daily_volatility_percent": None,
+        "kelly_allocation_percent": 0.0,
+        "stop_loss_price": None,
+        "take_profit_price": None,
+    }
+    if len(returns) < _MIN_KELLY_RETURNS:
+        return metrics
+
+    daily_volatility = statistics.stdev(returns)
+    entry_price = valid_prices[-1]
+    risk_per_share = entry_price * 2 * daily_volatility
+    if risk_per_share > 0:
+        metrics["stop_loss_price"] = round(max(0, entry_price - risk_per_share), 2)
+        metrics["take_profit_price"] = round(entry_price + 2 * risk_per_share, 2)
+    metrics["daily_volatility_percent"] = round(daily_volatility * 100, 2)
+
+    winning_returns = [daily_return for daily_return in returns if daily_return > 0]
+    losing_returns = [abs(daily_return) for daily_return in returns if daily_return < 0]
+    if len(winning_returns) < _MIN_KELLY_OUTCOMES or len(losing_returns) < _MIN_KELLY_OUTCOMES:
+        return metrics
+
+    win_probability = len(winning_returns) / (len(winning_returns) + len(losing_returns))
+    average_win = statistics.mean(winning_returns)
+    average_loss = statistics.mean(losing_returns)
+    payoff_ratio = average_win / average_loss if average_loss else 0
+    kelly_fraction = win_probability - (1 - win_probability) / payoff_ratio if payoff_ratio else 0
+    half_kelly_percent = max(0, kelly_fraction) * 50
+
+    metrics.update(
+        {
+            "win_probability_percent": round(win_probability * 100, 2),
+            "payoff_ratio": round(payoff_ratio, 2),
+            "kelly_allocation_percent": round(
+                min(half_kelly_percent, _MAX_POSITION_ALLOCATION_PERCENT), 2
+            ),
+        }
+    )
+    return metrics
+
+
+def _market_cache_key(provider, requested_symbols=None):
+    settings = {
+        name: os.getenv(name, "")
+        for name in (
+            "YAHOO_SYMBOLS",
+            "ALPHA_VANTAGE_SYMBOLS",
+            "YAHOO_MAX_SYMBOLS",
+            "ALPHA_VANTAGE_MAX_SYMBOLS",
+            "YAHOO_TICKER_SUFFIX",
+            "YAHOO_HOSE_SUFFIX",
+            "YAHOO_HNX_SUFFIX",
+        )
+    }
+    selected = ",".join(requested_symbols or ())
+    return f"v{_MARKET_CACHE_VERSION}:{provider}:{selected}:{json.dumps(settings, sort_keys=True)}"
+
+
+def get_market_data(force_refresh=False, symbols=None):
     global _market_data_cache, _market_data_cache_at, _market_universe_count
-    ttl_seconds = int(os.getenv("MARKET_DATA_CACHE_TTL", _CACHE_TTL_SECONDS))
+    global _market_data_source, _market_data_error
+    global _market_data_cache_key, _market_data_cache_status, _market_data_updated_at
+    provider = os.getenv("MARKET_DATA_PROVIDER", "yahoo").lower()
+    if provider == "alphavantage":
+        provider = "yahoo"
+    default_ttl = (
+        _YAHOO_CACHE_TTL_SECONDS if provider == "yahoo" else _CACHE_TTL_SECONDS
+    )
+    ttl_seconds = int(os.getenv("MARKET_DATA_CACHE_TTL", default_ttl))
+    requested_symbols = tuple(sorted({str(symbol).strip().upper() for symbol in symbols or () if str(symbol).strip()}))
+    cache_key = _market_cache_key(provider, requested_symbols)
     now = time.monotonic()
-    if _market_data_cache is not None and now - _market_data_cache_at < ttl_seconds:
+    if (
+        not force_refresh
+        and _market_data_cache is not None
+        and _market_data_cache_key == cache_key
+        and now - _market_data_cache_at < ttl_seconds
+    ):
         return _market_data_cache
+
+    disk_cache = load_market_cache(cache_key)
+    if not force_refresh and disk_cache:
+        age = max(0, time.time() - disk_cache["fetched_at"])
+        if age < ttl_seconds:
+            with _market_data_cache_lock:
+                _market_data_cache = disk_cache["rows"]
+                _market_data_cache_at = time.monotonic() - age
+                _market_data_cache_key = cache_key
+                _market_data_cache_status = "disk"
+                _market_data_updated_at = disk_cache["fetched_at"]
+                _market_data_source = disk_cache["source"]
+                _market_universe_count = disk_cache["universe_count"]
+                _market_data_error = None
+                return _market_data_cache
 
     with _market_data_cache_lock:
         now = time.monotonic()
-        if _market_data_cache is not None and now - _market_data_cache_at < ttl_seconds:
+        if (
+            not force_refresh
+            and _market_data_cache is not None
+            and _market_data_cache_key == cache_key
+            and now - _market_data_cache_at < ttl_seconds
+        ):
             return _market_data_cache
 
-        if os.getenv("MARKET_DATA_PROVIDER", "vnstock").lower() == "mock":
-            market_rows = mock_market_data.build_mock_market_data(use_vnstock=False)
+        if provider == "mock":
+            market_rows = mock_market_data.build_mock_market_data()
+            if requested_symbols:
+                requested = set(requested_symbols)
+                market_rows = [row for row in market_rows if row["symbol"] in requested]
             _market_universe_count = len(market_rows)
+            _market_data_source = "mock"
+            _market_data_error = None
+            cache_status = "demo"
         else:
-            market_rows, _market_universe_count = _fetch_vnstock_market_data()
-            if not market_rows:
-                market_rows = mock_market_data.build_mock_market_data(use_vnstock=False)
-                _market_universe_count = len(market_rows)
+            if provider == "yahoo":
+                if requested_symbols:
+                    market_rows, _market_universe_count = _fetch_yahoo_market_data(requested_symbols)
+                else:
+                    market_rows, _market_universe_count = _fetch_yahoo_market_data()
+                _market_data_source = "yahoo" if market_rows else "unavailable"
+                _market_data_error = (
+                    None
+                    if market_rows
+                    else (
+                        f"Không có giá Yahoo cho {', '.join(requested_symbols)}. Kiểm tra mã HOSE/HNX và độ phủ Yahoo."
+                        if requested_symbols
+                        else "Không nhận được giá mới từ Yahoo Finance. Kiểm tra độ phủ mã Yahoo (.VN), kết nối mạng và danh sách Vnstock."
+                    )
+                )
+                cache_status = "live" if market_rows else "unavailable"
+            else:
+                market_rows = []
+                _market_universe_count = 0
+                _market_data_source = "unavailable"
+                _market_data_error = "MARKET_DATA_PROVIDER không được hỗ trợ."
+                cache_status = "unavailable"
 
+        fetched_at = time.time()
+        if market_rows:
+            try:
+                save_market_cache(
+                    cache_key,
+                    market_rows,
+                    _market_data_source,
+                    _market_universe_count,
+                    fetched_at,
+                )
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+            _market_data_cache_status = cache_status
+            _market_data_updated_at = fetched_at
+        elif disk_cache:
+            market_rows = disk_cache["rows"]
+            _market_universe_count = disk_cache["universe_count"]
+            _market_data_source = disk_cache["source"]
+            _market_data_cache_status = "stale"
+            _market_data_updated_at = disk_cache["fetched_at"]
+        else:
+            _market_data_cache_status = "unavailable"
+            _market_data_updated_at = None
         _market_data_cache = market_rows
         _market_data_cache_at = time.monotonic()
+        _market_data_cache_key = cache_key
         return market_rows
+
+
+def refresh_market_data(symbols=None):
+    return get_market_data(force_refresh=True, symbols=symbols)
 
 
 def _evaluate_stock(item):
     trend = evaluate_trend_signal(item["close_prices"])
     mean_reversion = evaluate_mean_reversion_signal(item["close_prices"])
+    chart_patterns = analyze_chart_patterns(
+        item["close_prices"], item.get("volumes"), item.get("candles")
+    )
     score = (SCORES[trend["signal"]] + SCORES[mean_reversion["signal"]]) / 2
     recommendation = "Buy" if score >= 0.5 else "Sell" if score <= -0.5 else "Watch"
-    allocation = 20 if score == 1 else 10 if score == 0.5 else 0
+    risk_metrics = _calculate_risk_metrics(item["close_prices"])
+    allocation = (
+        risk_metrics["kelly_allocation_percent"] if recommendation == "Buy" else 0
+    )
 
     trend_reason = {
         "Bullish": f"Giá tăng {trend['momentum']}%, đạt ngưỡng xu hướng từ 5%.",
@@ -148,17 +357,21 @@ def _evaluate_stock(item):
         "trend_momentum": trend["momentum"],
         "mean_reversion_signal": mean_reversion["signal"],
         "mean_reversion_momentum": mean_reversion["momentum"],
+        "chart_patterns": chart_patterns,
         "last_price": trend.get("last_price", 0),
         "recommendation": recommendation,
         "score": score,
         "allocation_percent": allocation,
+        **risk_metrics,
         "trend_reason": trend_reason,
         "mean_reversion_reason": mean_reversion_reason,
         "reason": reason,
         "criteria": [
             "Xu hướng: biến động từ phiên cũ nhất đến mới nhất; Bullish >= 5%, Bearish <= -3%.",
             "Mean Reversion: so sánh trung bình 5 phiên gần nhất với lịch sử trước đó; Oversold <= -4%, Extended >= 4%.",
-            "Giải ngân: tối đa 20% khi cả hai chiến lược tích cực, 10% khi một chiến lược tích cực và chiến lược còn lại trung tính; chỉ áp dụng cho Top 5 mã mua, tổng tối đa 100%.",
+            "Giải ngân: ½ Kelly từ tỷ lệ phiên tăng và payoff ratio lịch sử; cần tối thiểu 20 phiên, ít nhất 5 phiên tăng và 5 phiên giảm; tối đa 20% mỗi mã và chỉ áp dụng cho Top 5 mã mua.",
+            "Cắt lỗ tham khảo: 2 độ lệch chuẩn ngày dưới giá đóng cửa gần nhất; chốt lời tại 2R. Đây là quy tắc biến động của ứng dụng, không phải mức giá do Edward Thorp quy định.",
+            "Mô hình kỹ thuật: cốc tay cầm và Sao Mai cần volume >= 1.5x trung bình 20 phiên; hai đáy/hai đỉnh, vai đầu vai và vai đầu vai ngược chờ xác nhận neckline/volume.",
         ],
     }
 
@@ -166,7 +379,11 @@ def _evaluate_stock(item):
 def _evaluate_market(market_data):
     rows = [_evaluate_stock(item) for item in market_data]
     buy_candidates = sorted(
-        (row for row in rows if row["score"] > 0),
+        (
+            row
+            for row in rows
+            if row["recommendation"] == "Buy" and row["kelly_allocation_percent"] > 0
+        ),
         key=lambda row: (row["score"], row["trend_momentum"]),
         reverse=True,
     )[:5]
@@ -175,15 +392,19 @@ def _evaluate_market(market_data):
     for row in rows:
         if row["symbol"] not in allocated_symbols:
             row["allocation_percent"] = 0
-            if row["score"] > 0:
+            if row["recommendation"] != "Buy":
+                row["allocation_reason"] = "Chưa đủ đồng thuận để giải ngân."
+            elif row["kelly_allocation_percent"] <= 0:
+                row["allocation_reason"] = "½ Kelly không có edge dương hoặc chưa đủ mẫu lịch sử."
+            else:
                 row["allocation_reason"] = "Ngoài Top 5 mã mua được xếp hạng."
         else:
-            row["allocation_reason"] = "Tỷ trọng theo mức đồng thuận của hai chiến lược."
+            row["allocation_reason"] = "Tỷ trọng theo ½ Kelly, sau giới hạn rủi ro của danh mục."
     return rows
 
 
-def get_screening_summary():
-    market_data = get_market_data()
+def get_screening_summary(symbols=None):
+    market_data = get_market_data(symbols=symbols)
     rows = []
     strategy_summary = {
         "trend_following": {"bullish": 0, "neutral": 0, "bearish": 0},
@@ -199,13 +420,25 @@ def get_screening_summary():
     source = (
         next(iter(data_sources))
         if len(data_sources) == 1
-        else "mixed" if data_sources else "mock"
+        else "mixed" if data_sources else _market_data_source
     )
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "data_updated_at": (
+            datetime.fromtimestamp(_market_data_updated_at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if _market_data_updated_at
+            else None
+        ),
         "source": source,
-        "exchanges": ["HOSE", "HNX"] if source == "vnstock" else [],
+        "data_status": _market_data_error,
+        "cache_status": _market_data_cache_status,
+        "cache_age_seconds": (
+            max(0, int(time.time() - _market_data_updated_at))
+            if _market_data_updated_at
+            else None
+        ),
+        "exchanges": sorted({item["exchange"] for item in market_data if item.get("exchange")}),
         "universe_count": _market_universe_count,
         "priced_count": len(rows),
         "symbols": [row["symbol"] for row in rows],
@@ -215,8 +448,8 @@ def get_screening_summary():
     }
 
 
-def get_recommendations():
-    stock_rows = _evaluate_market(get_market_data())
+def get_recommendations(symbols=None):
+    stock_rows = _evaluate_market(get_market_data(symbols=symbols))
     ranked = sorted(
         stock_rows,
         key=lambda entry: (entry["score"], entry["trend_momentum"]),

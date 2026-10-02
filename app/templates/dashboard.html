@@ -6,24 +6,52 @@
   <section class="hero">
     <div class="grid">
       <div>
-        <span class="badge">{% if overview.source == 'vnstock' %}VNStock • HOSE + HNX{% else %}Dữ liệu mô phỏng{% endif %} • {{ overview.priced_count }}/{{ overview.universe_count }} mã có giá</span>
+        {% if overview.cache_status == 'stale' %}
+          <span class="data-source data-source-unavailable">STALE · cache cũ từ Yahoo</span>
+        {% elif overview.cache_status == 'disk' %}
+          <span class="data-source data-source-cache">CACHE · Yahoo Finance</span>
+        {% elif overview.source == 'yahoo' %}
+          <span class="data-source data-source-live">LIVE · Yahoo Finance · dữ liệu ngày</span>
+        {% elif overview.source == 'mixed' %}
+          <span class="data-source data-source-demo">LIVE API + DEMO · dữ liệu pha trộn</span>
+        {% elif overview.source == 'unavailable' %}
+          <span class="data-source data-source-unavailable">YAHOO UNAVAILABLE · không có giá live</span>
+        {% else %}
+          <span class="data-source data-source-demo">DEMO · dữ liệu mô phỏng</span>
+        {% endif %}
+        <span class="badge">{{ overview.priced_count }}/{{ overview.universe_count }} mã có giá</span>
+        {% if overview.data_status %}<p class="data-status" role="status">{{ overview.data_status }}</p>{% endif %}
         <h1 style="margin-top: 1rem;">Bảng chấm điểm cổ phiếu Việt Nam</h1>
-        <p class="muted">Quét cổ phiếu HOSE và HNX bằng VNStock; tín hiệu kết hợp xu hướng giá và hồi quy về trung bình.</p>
+        <p class="muted">Đánh giá dữ liệu giá bằng tín hiệu xu hướng và hồi quy về trung bình.</p>
       </div>
       <div class="card">
-        <p class="muted">Cập nhật</p>
-        <div class="metric">{{ overview.generated_at[:10] }}</div>
-        <small class="muted">{{ overview.generated_at }}</small>
+        <p class="muted">Dữ liệu thị trường</p>
+        <div class="metric">{% if overview.data_updated_at %}{{ overview.data_updated_at[:10] }}{% else %}—{% endif %}</div>
+        <small class="muted">
+          {% if overview.data_updated_at %}{{ overview.data_updated_at[11:19] }} UTC · {% endif %}{% if overview.cache_status == 'live' %}Vừa lấy từ Yahoo{% elif overview.cache_status == 'disk' %}Đọc từ SQLite cache{% elif overview.cache_status == 'stale' %}Cache cũ · Yahoo chưa phản hồi{% elif overview.cache_status == 'demo' %}Dữ liệu mô phỏng{% else %}Chưa có dữ liệu{% endif %}
+        </small>
       </div>
     </div>
   </section>
+  <form class="stock-search" action="{{ url_for('recommendations_page') }}" method="get">
+    <div>
+      <label for="dashboard-symbol">Mã cổ phiếu HOSE/HNX</label>
+      <input id="dashboard-symbol" name="symbol" type="search" minlength="1" maxlength="10" pattern="[A-Za-z0-9]{1,10}" placeholder="Nhập mã, ví dụ FPT" required />
+    </div>
+    <button type="submit">Phân tích mã</button>
+  </form>
+  {% if refresh_result == 'success' %}<p class="status-message status-message-success" role="status">Đã tải và lưu dữ liệu mới.</p>
+  {% elif refresh_result == 'stale' %}<p class="status-message status-message-warning" role="status">Yahoo chưa phản hồi; đang dùng snapshot cache cũ.</p>
+  {% elif refresh_result == 'unavailable' %}<p class="status-message status-message-error" role="alert">Không tải được giá mới và không có cache để dùng.</p>{% endif %}
 
   <section class="grid" style="margin-top: 1.25rem;">
-    <article class="card">
+    <a class="card summary-link" href="#trend-following" aria-label="Xem danh sách cổ phiếu có tín hiệu Trend Following Bullish">
       <p class="muted">Trend Following</p>
       <div class="metric">{{ overview.strategy_summary.trend_following.bullish }}</div>
       <small class="pill-positive">Tín hiệu Bullish</small>
-    </article>
+      <br />
+      <small class="summary-link-action">Xem danh sách</small>
+    </a>
     <article class="card">
       <p class="muted">Mean Reversion</p>
       <div class="metric">{{ overview.strategy_summary.mean_reversion.oversold }}</div>
@@ -37,12 +65,57 @@
     <article class="card">
       <p class="muted">Phân bổ</p>
       <div class="metric">{{ fixed_allocation }}%</div>
-      <small class="muted">Tối đa mỗi mã khi hai tín hiệu đồng thuận mua</small>
+      <small class="muted">Giới hạn tối đa mỗi mã theo ½ Kelly</small>
     </article>
+  </section>
+
+  <section id="trend-following" style="margin-top: 2rem;">
+    <h2>Cổ phiếu Trend Following · Bullish</h2>
+    <p class="muted">Danh sách mã đạt tín hiệu xu hướng tăng, kèm tỷ trọng Kelly và các mức giá rủi ro tham khảo.</p>
+    <div class="table-scroll">
+      <table class="risk-table">
+        <thead>
+          <tr>
+            <th>Mã</th>
+            <th>Sàn</th>
+            <th>Biến động xu hướng</th>
+            <th>Giá tham chiếu</th>
+            <th>P tăng · b lãi/lỗ</th>
+            <th>Cắt lỗ · 2σ</th>
+            <th>Chốt lời · 2R</th>
+            <th>Phân bổ thực tế</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in overview.stocks if row.trend_signal == 'Bullish' %}
+            <tr>
+              <td><strong>{{ row.symbol }}</strong></td>
+              <td>{{ row.exchange or '—' }}</td>
+              <td>{{ row.trend_momentum }}%</td>
+              <td>{{ '%.2f'|format(row.last_price) }}</td>
+              <td>
+                {% if row.win_probability_percent is not none and row.payoff_ratio is not none %}
+                  {{ row.win_probability_percent }}% · b={{ row.payoff_ratio }}
+                {% else %}Chưa đủ mẫu{% endif %}
+              </td>
+              <td>{% if row.stop_loss_price is not none %}{{ '%.2f'|format(row.stop_loss_price) }}{% else %}—{% endif %}</td>
+              <td>{% if row.take_profit_price is not none %}{{ '%.2f'|format(row.take_profit_price) }}{% else %}—{% endif %}</td>
+              <td>
+                <strong>{{ row.allocation_percent }}%</strong>
+                <small class="muted">{{ row.allocation_reason }}</small>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8" class="muted">Chưa có mã đạt tín hiệu Bullish trong dữ liệu hiện tại.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section style="margin-top: 2rem;">
     <h2>Tín hiệu toàn thị trường</h2>
+    <div class="table-scroll">
     <table>
       <thead>
         <tr>
@@ -50,6 +123,7 @@
           <th>Sàn</th>
           <th>Trend</th>
           <th>Mean Reversion</th>
+          <th>Mô hình kỹ thuật</th>
           <th>Khuyến nghị</th>
           <th>Giải ngân</th>
           <th>Lý do</th>
@@ -63,6 +137,16 @@
             <td>{{ row.trend_signal }} ({{ row.trend_momentum }}%)</td>
             <td>{{ row.mean_reversion_signal }} ({{ row.mean_reversion_momentum }}%)</td>
             <td>
+              <div class="pattern-list">
+                {% for pattern in row.chart_patterns %}
+                  <div class="pattern-item {% if pattern.signal == 'Mua' %}pattern-buy{% elif pattern.signal == 'Bán' %}pattern-sell{% elif pattern.signal == 'Theo dõi' %}pattern-watch{% else %}pattern-none{% endif %}">
+                    <span class="pattern-label">{{ pattern.name }} · {{ pattern.signal }}</span>
+                    {% if pattern.neckline is not none %}<small class="pattern-detail">Neckline {{ '%.2f'|format(pattern.neckline) }}{% if pattern.volume_ratio is not none %} · {{ pattern.volume_ratio }}× {{ pattern.volume_basis }}{% endif %}</small>{% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </td>
+            <td>
               {% if row.recommendation == 'Buy' %}<span class="pill-positive">Mua</span>
               {% elif row.recommendation == 'Sell' %}<span class="pill-warning">Bán</span>
               {% else %}<span class="pill-neutral">Theo dõi</span>
@@ -74,10 +158,12 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 
   <section style="margin-top: 2rem;">
     <h2>Khuyến nghị đầu tư</h2>
+    <div class="table-scroll">
     <table>
       <thead>
         <tr>
@@ -104,15 +190,17 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 
   <section style="margin-top: 2rem;">
-    <h2>Tiêu chí lọc</h2>
+    <h2>Tiêu chí lọc & quản trị vốn</h2>
     <div class="card">
       <p>Trend Following: so sánh giá đóng cửa phiên đầu và cuối trong tối đa 100 phiên; Bullish từ +5%, Bearish từ -3%, còn lại là Neutral.</p>
       <p>Mean Reversion: so sánh trung bình 5 phiên gần nhất với các phiên trước; Oversold từ -4%, Extended từ +4%. Với dữ liệu tối đa 5 phiên, ngưỡng Oversold là -7%.</p>
-      <p>Giải ngân theo từng mã: tối đa 20% khi cả hai tín hiệu tích cực, 10% khi một tín hiệu tích cực và tín hiệu kia trung tính. Tỷ trọng chỉ dành cho Top 5 mã mua, tổng tối đa 100%.</p>
-      <p class="muted">Nguồn mô phỏng được dùng khi VNStock không trả dữ liệu; tín hiệu chỉ dựa trên giá đóng cửa, chưa xét thanh khoản, phí, sức mua hoặc mức chịu rủi ro.</p>
+      <p>Giải ngân dùng ½ Kelly: p là tỷ lệ phiên tăng, b là lãi trung bình/lỗ trung bình trên chuỗi giá lịch sử; cần ít nhất 20 phiên và tối thiểu 5 phiên tăng, 5 phiên giảm. Tỷ trọng tối đa 20% mỗi mã, chỉ áp dụng cho Top 5 mã có khuyến nghị Mua; tổng không vượt 100%.</p>
+      <p>Cắt lỗ tham khảo ở 2 độ lệch chuẩn ngày dưới giá đóng cửa gần nhất; chốt lời ở mức lời bằng 2 lần rủi ro (2R). Edward Thorp gắn với tiêu chí Kelly để định cỡ vị thế, không đưa ra một công thức stop-loss/take-profit phổ quát; các mức giá trên là quy tắc biến động của ứng dụng.</p>
+      <p class="muted">Nhãn LIVE nghĩa là giá lịch sử ngày lấy từ Yahoo Finance, không phải báo giá realtime. DEMO là dữ liệu mô phỏng. Kelly và các mức giá rủi ro chỉ là ước tính từ dữ liệu lịch sử, chưa xét phí, thanh khoản, gap giá hoặc mức chịu lỗ cá nhân.</p>
     </div>
   </section>
 {% endblock %}

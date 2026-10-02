@@ -1,42 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import math
+from datetime import datetime, timezone
 
 
-def _load_vnstock_quote():
-    from vnstock.api.quote import Quote
-
-    return Quote
-
-
-def _fetch_vnstock_close_prices(quote_class, symbol):
-    end = datetime.now(timezone.utc).date()
-    start = end - timedelta(days=180)
-    history = quote_class(symbol=symbol, source="VCI").history(
-        start=start.isoformat(),
-        end=end.isoformat(),
-        interval="1D",
-    )
-    if history is None or history.empty or "close" not in history.columns:
-        return []
-
-    close_prices = []
-    for price in history["close"].dropna().tolist()[-100:]:
-        value = float(price)
-        if math.isfinite(value):
-            close_prices.append(value)
-    return close_prices
-
-
-def build_mock_market_data(use_vnstock=True):
-    quote_class = None
-    if use_vnstock:
-        try:
-            quote_class = _load_vnstock_quote()
-        except Exception:
-            quote_class = None
-
+def build_mock_market_data():
     symbols = [
         {"symbol": "VIC", "name": "Vingroup", "base": 56.4, "trend": 0.014, "volatility": 0.022},
         {"symbol": "FPT", "name": "FPT", "base": 88.3, "trend": 0.011, "volatility": 0.018},
@@ -64,21 +31,12 @@ def build_mock_market_data(use_vnstock=True):
             swing = ((session % 7) - 3) * stock["volatility"] * current * 0.4
             current = max(8.0, current + drift + swing + (idx % 3) * 0.22)
             prices.append(round(current, 2))
-        source = "mock"
-        if quote_class is not None:
-            try:
-                vnstock_prices = _fetch_vnstock_close_prices(quote_class, stock["symbol"])
-                if vnstock_prices:
-                    prices = vnstock_prices
-                    source = "vnstock"
-            except Exception:
-                pass
         market_data.append({
             "symbol": stock["symbol"],
             "name": stock["name"],
             "base": stock["base"],
             "close_prices": prices,
-            "source": source,
+            "source": "mock",
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
     return market_data

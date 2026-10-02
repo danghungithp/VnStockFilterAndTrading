@@ -1,9 +1,12 @@
-from flask import jsonify, render_template
+import re
+
+from flask import jsonify, redirect, render_template, request, url_for
 
 from app.services.screening_service import (
     get_recommendations,
     get_screening_summary,
     get_strategy_rows,
+    refresh_market_data,
 )
 
 
@@ -17,15 +20,52 @@ def register_routes(app):
             overview=overview,
             recommendations=recommendation_data["recommendations"],
             fixed_allocation=recommendation_data["fixed_allocation"],
+            refresh_result=request.args.get("refresh_result"),
         )
 
     @app.route("/recommendations")
     def recommendations_page():
-        recommendation_data = get_recommendations()
+        requested_symbol = request.args.get("symbol", "").strip().upper()
+        if requested_symbol and not re.fullmatch(r"[A-Z0-9]{1,10}", requested_symbol):
+            return "Mã cổ phiếu không hợp lệ.", 400
+        symbols = [requested_symbol] if requested_symbol else None
+        recommendation_data = get_recommendations(symbols=symbols)
+        overview = get_screening_summary(symbols=symbols)
         return render_template(
             "recommendations.html",
             recommendations=recommendation_data["recommendations"],
+            requested_symbol=requested_symbol,
             fixed_allocation=recommendation_data["fixed_allocation"],
+            data_source=overview["source"],
+            data_status=overview["data_status"],
+            cache_status=overview["cache_status"],
+            data_updated_at=overview["data_updated_at"],
+            priced_count=overview["priced_count"],
+            universe_count=overview["universe_count"],
+            refresh_result=request.args.get("refresh_result"),
+        )
+
+    @app.route("/market-data/refresh", methods=["POST"])
+    def refresh_market_data_route():
+        requested_symbol = request.form.get("symbol", "").strip().upper()
+        if requested_symbol and not re.fullmatch(r"[A-Z0-9]{1,10}", requested_symbol):
+            return "Mã cổ phiếu không hợp lệ.", 400
+        symbols = [requested_symbol] if requested_symbol else None
+        refresh_market_data(symbols=symbols)
+        overview = get_screening_summary(symbols=symbols)
+        refresh_result = (
+            "success"
+            if overview["cache_status"] in {"live", "demo"}
+            else "stale" if overview["cache_status"] == "stale" else "unavailable"
+        )
+        return_to = request.form.get("return_to")
+        endpoint = return_to if return_to in {"dashboard", "recommendations_page"} else "dashboard"
+        return redirect(
+            url_for(
+                endpoint,
+                refresh_result=refresh_result,
+                **({"symbol": requested_symbol} if requested_symbol and endpoint == "recommendations_page" else {}),
+            )
         )
 
     @app.route("/api/health")
